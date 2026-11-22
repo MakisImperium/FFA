@@ -1,5 +1,5 @@
 name: FFAGameV2
-version: "2.0.0"
+version: "3.0.0"
 api: ["3.0.6"]
 author: MakisImperium
 description: Professional multi-arena FFA minigame with JSON or MySQL profile storage
