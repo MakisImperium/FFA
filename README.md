@@ -1,93 +1,68 @@
-# FFAGameV2
+<p align="center">
+  <img src="docs/assets/zernyth-ffa.png" alt="Zernyth FFA with the silver and violet Zernyth emblem beside a torchlit PvP arena" width="100%">
+</p>
 
-Professional multi-arena FFA minigame plugin for Nukkit/Cloudburst servers.  
-This project is a full rewrite with clean architecture, form-only UX, JSON-first content storage, and optional MySQL profile storage.
+<div align="center">
 
-## Highlights
+# Zernyth FFA
 
-- Full multi-arena system with per-arena world binding.
-- Arena-safe zones with 2-click selection mode (auto-save).
-- Form-only UX (`/ffa`, `/ffaadmin`) with strict sector routing.
-- Advanced kit system (snapshot, item manager, armor manager, ordered remove flow).
-- Live arena scoreboard (arena-only, per-player toggle, EN/DE language support).
-- Profile/stat persistence by UUID with:
-  - `MYSQL` (recommended for production), or
-  - `JSON` fallback/alternative.
-- Runtime database outage protection:
-  - stats service goes unavailable,
-  - all arenas forced offline,
-  - 3 reconnect attempts in 15s intervals,
-  - plugin disables itself if DB cannot recover.
+**Multi-arena free-for-all for Minecraft: Bedrock Edition**
 
-## Runtime Behavior
+Run PvP arenas on PowerNukkitX with configurable kits, protected spawn areas, and in-game menus for players and admins.
 
-### Form-Only Navigation
+**PowerNukkitX 3.0.6 · Java 21+ · English / German**
 
-- No subcommand tree.
-- Player UI is fully form-driven.
-- `/ffa`:
-  - outside arena: Arena / Stats / Settings.
-  - inside arena: Leave Arena / Kits / Settings.
-- `/ffaadmin`: Admin forms only (OP or `ffa.admin` permission).
+[Quick start](#quick-start) · [Arena setup](#arena-setup) · [Commands](#commands) · [Configuration](#configuration) · [Development](#development)
 
-### Arena Rules
+</div>
 
-- Join is only possible when arena status is `Live`.
-- Block break/place/drop are blocked in arena.
-- Safe-zone blocks combat and damage interactions.
-- Safe-zone setup:
-  1. Start 2-click mode in admin forms.
-  2. Click block #1.
-  3. Click block #2.
-  4. Zone is stored automatically.
+---
 
-### Stats + Database Outage Mode (MySQL)
+## Quick start
 
-If `storageBackend` is `MYSQL` and the connection drops:
+Build with a JDK 21 or newer. Choose either build tool.
 
-1. Stats/service is marked unavailable immediately.
-2. All arenas are forced to `Offline`.
-3. Active arena sessions are ended.
-4. Reconnect is attempted 3 times every 15 seconds.
-5. If still unreachable, plugin logs recommendation to switch to `JSON` and disables itself.
+| Build tool | Command | Plugin JAR |
+| --- | --- | --- |
+| Gradle Wrapper (Windows PowerShell) | `.\gradlew.bat build` | `build/libs/ZernythFFA.jar` |
+| Gradle Wrapper (Linux/macOS) | `sh ./gradlew build` | `build/libs/ZernythFFA.jar` |
+| Maven | `mvn clean package` | `target/ZernythFFA.jar` |
 
-When MySQL recovers before attempt 3, stats service is restored.  
-Arenas stay offline until an admin re-enables them.
+The Gradle Wrapper downloads the pinned Gradle version on first use. The Maven command uses a local Maven installation.
 
-## Architecture
+1. Stop the PowerNukkitX 3.0.6 server and copy `ZernythFFA.jar` into its `plugins/` directory. When upgrading, replace the previous plugin JAR. Start the server again.
+2. In game, open `/ffaadmin` as an operator or with the `ffa.admin` permission. Follow the arena setup below, then join through `/ffa`.
 
-Base package:
+On first launch, the plugin creates `plugins/FFAGameV2/` and a **Soldier** kit if no kits exist. Player profiles use JSON until MySQL is configured.
 
-```text
-makisimperium.ffa
-```
+## Arena setup
 
-Core modules:
+1. In **Arena Management → Create Arena**, enter an arena ID, a display name, and the name of an existing server world.
+2. Stand at a spawn point in that world and use **Add Spawn** to record your position and facing direction. Repeat for each spawn you want to add.
+3. To protect an area, open **Arena Management → Zone Tools** and start safe-zone placement. Select the arena and click two opposite corner blocks in its world. The cuboid saves automatically.
+4. Open **Set Arena Status** and choose **Live**. An arena needs a loadable world and at least one spawn before players can join.
 
-- `arena`: arena models, persistence, catalog/session services.
-- `kit`: kit models, JSON repository, selection/application/registry services.
-- `player`: profile model, preferences, stats, repository abstractions.
-- `ui.form`: complete form routing and flows.
-- `listener`: game protection, lifecycle, form interaction, zone placement.
-- `scoreboard`: arena-only scoreboard service.
-- `i18n`: JSON language bundle loading and key resolution.
-- `config`: JSON config model and loader.
+Use **Kit Management → Create / Update Kit → Snapshot from inventory** to save your current items and armor. The admin menu also lets you edit individual kit slots and armor pieces.
 
-## Storage Model
+## Commands
 
-- No YAML storage for runtime data systems.
-- JSON used for:
-  - config,
-  - arenas,
-  - kits,
-  - language bundles,
-  - optional JSON player profiles.
-- UUID is the canonical key for player persistence.
-- Player names are display-only.
+| Command | Opens | Access |
+| --- | --- | --- |
+| `/ffa` | Arena, stats, and settings menus. Inside an arena, it opens the leave, kit, and settings options. | In-game players |
+| `/ffaadmin` | Arena and kit management forms. | Operators by default, or players with `ffa.admin` |
+
+Players can choose English or German and toggle the arena scoreboard in **Settings**. The scoreboard shows the arena, player count, kills, deaths, and current streak. Arena sessions block block breaking, block placement, and item drops. Safe zones block combat and damage.
 
 ## Configuration
 
-`plugins/FFAGameV2/config.json`:
+Edit `plugins/FFAGameV2/config.json` and restart the server to apply changes.
+
+| `storageBackend` | Player profiles and stats |
+| --- | --- |
+| `JSON` | Local files in `players/`. Runs without a database. |
+| `MYSQL` | MySQL table keyed by player UUID. The generated configuration selects MySQL and uses JSON while the database credentials are incomplete. |
+
+For a local JSON setup, use `"storageBackend": "JSON"`. To enable MySQL, create the database and supply its connection settings. The plugin creates the profile table.
 
 ```json
 {
@@ -96,8 +71,8 @@ Core modules:
     "host": "127.0.0.1",
     "port": 3306,
     "database": "ffa",
-    "username": "root",
-    "password": "change-me",
+    "username": "ffa",
+    "password": "your-database-password",
     "table": "ffa_player_profiles",
     "useSsl": false,
     "allowPublicKeyRetrieval": true
@@ -109,40 +84,30 @@ Core modules:
 }
 ```
 
-### Storage Backend Options
+If a configured MySQL connection drops while the server is running, the plugin takes stats offline, ends active arena sessions, and sets all arenas to **Offline**. It tries to reconnect up to three times at 15-second intervals. Once MySQL recovers, stats return and an admin can set each arena back to **Live**. If all three attempts fail, the plugin disables itself.
 
-- `MYSQL`: strict DB mode with outage handling and reconnect policy.
-- `JSON`: no external DB dependency.
+### Data files
 
-If MySQL is not configured, plugin informs and uses JSON storage.
+| Path under `plugins/FFAGameV2/` | Contents |
+| --- | --- |
+| `config.json` | Storage and scoreboard settings |
+| `arenas/` | Arena definitions, spawn points, and zones |
+| `kits/` | Kit inventories and armor |
+| `lang/en.json`, `lang/de.json` | English and German text |
+| `players/` | UUID-keyed profiles in JSON mode |
 
-## Commands
+Kits use item IDs such as `minecraft:iron_sword`. Replace any numeric IDs in existing kit JSON files with their PowerNukkitX equivalents. Items with unrecognized IDs appear as **Unknown Item** and are skipped when equipping.
 
-- `/ffa` - Open player menu (forms).
-- `/ffaadmin` - Open admin console (forms).
+## Development
 
-## Permissions
+Keep the Java target and dependency versions in sync between [`build.gradle.kts`](build.gradle.kts) and [`pom.xml`](pom.xml) when changing the build.
 
-- `ffa.admin` (default: op)
+The Java sources use the `net.zernyth.ffa` namespace. [`FFABootstrap`](src/main/java/net/zernyth/ffa/FFABootstrap.java) wires storage, services, commands, and listeners. The [PowerNukkitX descriptor](src/main/resources/powernukkitx.yml) declares the entry point and admin permission.
 
-## Build
-
-Maven package output is configured as:
-
-```text
-target/FFAGameV2.jar
-```
-
-Build command:
-
-```bash
-mvn clean package
-```
-
-## Release Notes (Current)
-
-- Package namespace migrated to `makisimperium.ffa`.
-- Bootstrap class renamed to `FFABootstrap`.
-- Maven artifact cleaned and output jar standardized to `FFAGameV2.jar`.
-- UI displays arena/kit names instead of internal IDs.
-- Localization auto-persists discovered translation keys into `lang/en.json` and `lang/de.json`.
+| Package | Responsibility |
+| --- | --- |
+| `arena` | Arena definitions, persistence, sessions, spawns, and safe zones |
+| `kit` | Kit storage, selection, and inventory application |
+| `player` | Profiles, statistics, preferences, and JSON/MySQL repositories |
+| `ui.form`, `command`, `listener` | Menus, command entry points, and server events |
+| `scoreboard`, `i18n`, `config` | Live scoreboard, translations, and settings |

@@ -1,0 +1,10 @@
+name: FFAGameV2
+version: "2.0.0"
+api: ["3.0.6"]
+author: MakisImperium
+description: Professional multi-arena FFA minigame with JSON or MySQL profile storage
+main: net.zernyth.ffa.FFABootstrap
+permissions:
+  ffa.admin:
+    default: op
+    description: Allows administration of arenas and kits
