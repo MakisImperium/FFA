@@ -1,0 +1,48 @@
+# Baut ZernythFFA mit Gradle, veröffentlicht es in GitHub Packages
+# und hängt die ZernythFFA.jar an das GitHub-Release an.
+# Auslöser: ein neues Release (z. B. Tag "v3.0.1" -> Version 3.0.1).
+
+name: Gradle Package
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # zum Hochladen der JAR ans Release
+      packages: write   # zum Veröffentlichen in GitHub Packages
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+
+    - name: Version aus Release-Tag ermitteln
+      id: version
+      run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+    - name: Build with Gradle
+      run: ./gradlew shadowJar -PreleaseVersion=${{ steps.version.outputs.value }}
+
+    # USERNAME und TOKEN werden im publishing-Block der build.gradle.kts gelesen
+    - name: Publish to GitHub Packages
+      run: ./gradlew publish -PreleaseVersion=${{ steps.version.outputs.value }}
+      env:
+        USERNAME: ${{ github.actor }}
+        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: JAR ans Release anhängen
+      run: gh release upload "$GITHUB_REF_NAME" build/libs/ZernythFFA.jar --clobber
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

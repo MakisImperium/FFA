@@ -1,10 +1,11 @@
 plugins {
     java
+    `maven-publish`
     id("com.gradleup.shadow") version "9.6.1"
 }
 
 group = "net.zernyth.ffa"
-version = "3.0.0"
+version = providers.gradleProperty("releaseVersion").getOrElse("3.0.0")
 
 repositories {
     mavenCentral()
@@ -43,4 +44,22 @@ tasks.shadowJar {
         duplicatesStrategy = DuplicatesStrategy.INCLUDE
     }
     mergeServiceFiles()
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("shadow") {
+            from(components["shadow"])
+        }
+    }
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/MakisImperium/FFA")
+            credentials {
+                username = System.getenv("USERNAME")
+                password = System.getenv("TOKEN")
+            }
+        }
+    }
 }
