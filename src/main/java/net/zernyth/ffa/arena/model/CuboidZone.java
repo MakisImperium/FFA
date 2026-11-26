@@ -42,6 +42,30 @@ public final class CuboidZone {
         return worldName;
     }
 
+    public double getMinX() {
+        return minX;
+    }
+
+    public double getMinY() {
+        return minY;
+    }
+
+    public double getMinZ() {
+        return minZ;
+    }
+
+    public double getMaxX() {
+        return maxX;
+    }
+
+    public double getMaxY() {
+        return maxY;
+    }
+
+    public double getMaxZ() {
+        return maxZ;
+    }
+
     public boolean contains(Location location) {
         if (location == null || location.getLevel() == null) {
             return false;

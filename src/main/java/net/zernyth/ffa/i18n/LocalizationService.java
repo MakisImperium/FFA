@@ -48,6 +48,23 @@ public final class LocalizationService {
         this.germanTranslations = german.translations == null ? Map.of() : new HashMap<>(german.translations);
     }
 
+    /**
+     * Reads both language files (off the main thread) and returns the step that swaps them in, to run
+     * on the main thread.
+     */
+    public Runnable prepareReload() throws IOException {
+        LanguageBundle english = loadOrCreateBundle(englishPath, defaultEnglishTranslations());
+        LanguageBundle german = loadOrCreateBundle(germanPath, defaultGermanTranslations());
+        Map<String, String> nextEnglish = english.translations == null ? new HashMap<>() : new HashMap<>(english.translations);
+        Map<String, String> nextGerman = german.translations == null ? new HashMap<>() : new HashMap<>(german.translations);
+        return () -> {
+            synchronized (translationLock) {
+                this.englishTranslations = nextEnglish;
+                this.germanTranslations = nextGerman;
+            }
+        };
+    }
+
     public String resolve(PlayerLanguage language, String englishFallback, String germanFallback) {
         ensureTranslationKey(englishFallback, germanFallback);
         if (language == PlayerLanguage.GERMAN) {

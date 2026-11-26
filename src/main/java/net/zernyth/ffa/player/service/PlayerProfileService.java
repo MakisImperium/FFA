@@ -271,6 +271,11 @@ public final class PlayerProfileService {
         persistProfile(profile);
     }
 
+    /** The storage itself, for admin tools that run off the main thread (the migration). */
+    public PlayerProfileRepository repository() {
+        return repository;
+    }
+
     /** Applies a change to a loaded profile and saves it; does nothing while it loads or offline. */
     public boolean update(UUID uniqueId, Consumer<PlayerProfile> change) {
         PlayerProfile profile = editable(uniqueId);

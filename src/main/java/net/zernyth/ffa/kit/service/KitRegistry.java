@@ -43,6 +43,37 @@ public final class KitRegistry {
         }
     }
 
+    /** Reads every kit file; for a reload, off the main thread. */
+    public List<KitDefinition> readAllFromDisk() throws Exception {
+        return kitRepository.loadAll();
+    }
+
+    /** Swaps in kits read by {@link #readAllFromDisk()}; an empty result keeps the current kits. */
+    public boolean replaceAll(Collection<KitDefinition> kits) {
+        Map<String, KitDefinition> next = new java.util.HashMap<>();
+        for (KitDefinition kit : kits) {
+            if (kit.getKitId() != null && !kit.getKitId().isBlank()) {
+                next.put(normalize(kit.getKitId()), kit);
+            }
+        }
+        if (next.isEmpty()) {
+            return false;
+        }
+        kitsById.keySet().retainAll(next.keySet());
+        kitsById.putAll(next);
+        return true;
+    }
+
+    /** The level a player needs for this kit (1 = everyone). */
+    public boolean setRequiredLevel(String kitId, int level) {
+        Optional<KitDefinition> kit = findKit(kitId);
+        if (kit.isEmpty()) {
+            return false;
+        }
+        kit.get().setRequiredLevel(Math.max(1, level));
+        return saveKit(kit.get());
+    }
+
     public Collection<KitDefinition> listKits() {
         return kitsById.values();
     }

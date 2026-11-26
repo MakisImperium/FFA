@@ -9,6 +9,7 @@ public final class PluginConfiguration {
     private net.zernyth.ffa.streak.StreakConfiguration streaks = new net.zernyth.ffa.streak.StreakConfiguration();
     private net.zernyth.ffa.progression.ProgressionConfiguration progression = new net.zernyth.ffa.progression.ProgressionConfiguration();
     private net.zernyth.ffa.economy.EconomyConfiguration economy = new net.zernyth.ffa.economy.EconomyConfiguration();
+    private net.zernyth.ffa.event.EventConfiguration events = new net.zernyth.ffa.event.EventConfiguration();
 
     public StorageBackend resolveStorageBackend() {
         return StorageBackend.fromText(storageBackend);
@@ -56,6 +57,13 @@ public final class PluginConfiguration {
         return economy;
     }
 
+    public net.zernyth.ffa.event.EventConfiguration getEvents() {
+        if (events == null) {
+            events = new net.zernyth.ffa.event.EventConfiguration();
+        }
+        return events;
+    }
+
     public void normalize() {
         getDatabase();
         getScoreboard();
@@ -63,6 +71,7 @@ public final class PluginConfiguration {
         getStreaks();
         getProgression();
         getEconomy();
+        getEvents();
     }
 }
 

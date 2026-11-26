@@ -263,6 +263,7 @@ public final class FFABootstrap extends PluginBase {
         FfaCommand ffaCommand = new FfaCommand(formController);
         FfaAdminCommand ffaAdminCommand = new FfaAdminCommand(formController);
         registerModes(ffaCommand, ffaAdminCommand);
+        registerAdminTools(ffaAdminCommand, economyService, configurationService, dataPath);
         getServer().getCommandMap().register("ffa", ffaCommand);
         getServer().getCommandMap().register("ffaadmin", ffaAdminCommand);
 
@@ -273,6 +274,28 @@ public final class FFABootstrap extends PluginBase {
                 }
             });
         }
+    }
+
+    /** Reload, arena tools, kick, announcements, boost events, migration and kit levels. */
+    private void registerAdminTools(FfaAdminCommand admin, net.zernyth.ffa.economy.EconomyService economy,
+                                    ConfigurationService configurationService, Path dataPath) {
+        var events = new net.zernyth.ffa.event.EventService(() -> pluginConfiguration.getEvents(),
+                () -> pluginConfiguration.getProgression().zone(), System::currentTimeMillis);
+        progressionService.setXpMultiplier(events::xpMultiplier);
+        economy.setCoinMultiplier(events::coinMultiplier);
+        scoreboardService.addLineProvider((viewer, language) -> events.active()
+                .map(active -> java.util.List.of(TextFormat.LIGHT_PURPLE
+                        + net.zernyth.ffa.admin.AdminCommands.multiplier(active.xp())
+                        + (language == net.zernyth.ffa.player.model.PlayerLanguage.GERMAN ? "x EP " : "x XP ")
+                        + net.zernyth.ffa.admin.AdminCommands.multiplier(active.coins()) + "x $ "
+                        + TextFormat.GRAY + net.zernyth.ffa.admin.AdminCommands.minutesLeft(active) + "m"))
+                .orElse(java.util.List.of()));
+        var tools = new net.zernyth.ffa.admin.AdminCommands(new net.zernyth.ffa.admin.AdminCommands.Context(
+                this, jsonFileService, dataPath, configurationService, next -> this.pluginConfiguration = next,
+                arenaCatalogService, arenaSessionService, kitRegistry, localizationService, playerProfileService,
+                killService, events, () -> resolvedStorageBackend == StorageBackend.MYSQL));
+        tools.register(admin.subcommands());
+        getServer().getScheduler().scheduleRepeatingTask(this, tools::announceEvents, 20 * 30);
     }
 
     /** Duels, spectating and team arenas, with their commands. */

@@ -36,6 +36,66 @@ public final class ArenaCatalogService {
         }
     }
 
+    /** Reads every arena file; for a reload, off the main thread. Nothing changes yet. */
+    public List<ArenaDefinition> readAllFromDisk() throws Exception {
+        return repository.loadAll();
+    }
+
+    /** Swaps in arenas read by {@link #readAllFromDisk()}; on the main thread. */
+    public void replaceAll(Collection<ArenaDefinition> arenas) {
+        Map<String, ArenaDefinition> next = new java.util.HashMap<>();
+        for (ArenaDefinition arena : arenas) {
+            if (arena.getArenaId() != null && !arena.getArenaId().isBlank()) {
+                next.put(normalize(arena.getArenaId()), arena);
+            }
+        }
+        arenasById.keySet().retainAll(next.keySet());
+        arenasById.putAll(next);
+    }
+
+    /** Removes spawn number {@code index} (0-based). */
+    public boolean removeSpawnPoint(String arenaId, int index) {
+        Optional<ArenaDefinition> arena = findArena(arenaId);
+        if (arena.isEmpty() || index < 0 || index >= arena.get().getSpawnPoints().size()) {
+            return false;
+        }
+        arena.get().getSpawnPoints().remove(index);
+        if (arena.get().getSpawnPoints().isEmpty() && arena.get().getStatus() == ArenaStatus.ACTIVE) {
+            arena.get().setStatus(ArenaStatus.WAITING); // an active arena needs a spawn
+        }
+        return persistAndUpdate(arena.get());
+    }
+
+    public boolean removeZone(String arenaId, String zoneId) {
+        Optional<ArenaDefinition> arena = findArena(arenaId);
+        if (arena.isEmpty() || zoneId == null) {
+            return false;
+        }
+        String normalizedZoneId = zoneId.trim().toLowerCase(Locale.ROOT);
+        if (arena.get().getZones().remove(normalizedZoneId) == null) {
+            return false;
+        }
+        if (normalizedZoneId.equals(arena.get().getSafeZoneId())) {
+            arena.get().setSafeZoneId(null);
+        }
+        return persistAndUpdate(arena.get());
+    }
+
+    /** A copy with spawns, zones and settings under a new id; it starts as WAITING. */
+    public Optional<ArenaDefinition> copyArena(String sourceId, String newId, String displayName) {
+        Optional<ArenaDefinition> source = findArena(sourceId);
+        if (source.isEmpty() || newId == null || newId.isBlank() || findArena(newId).isPresent()) {
+            return Optional.empty();
+        }
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        com.google.gson.JsonObject json = gson.toJsonTree(source.get()).getAsJsonObject();
+        json.addProperty("arenaId", normalize(newId));
+        json.addProperty("displayName", displayName == null || displayName.isBlank() ? newId.trim() : displayName.trim());
+        json.addProperty("status", ArenaStatus.WAITING.name());
+        ArenaDefinition copy = gson.fromJson(json, ArenaDefinition.class);
+        return persistAndUpdate(copy) ? Optional.of(copy) : Optional.empty();
+    }
+
     public Collection<ArenaDefinition> listArenas() {
         return arenasById.values();
     }

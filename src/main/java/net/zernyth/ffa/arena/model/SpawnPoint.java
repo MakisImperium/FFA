@@ -22,6 +22,18 @@ public final class SpawnPoint {
         this.pitch = pitch;
     }
 
+    public double getX() {
+        return x;
+    }
+
+    public double getY() {
+        return y;
+    }
+
+    public double getZ() {
+        return z;
+    }
+
     public static SpawnPoint fromLocation(Location location) {
         return new SpawnPoint(location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
     }

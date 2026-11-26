@@ -18,6 +18,14 @@ public final class ConfigurationService {
         this.configPath = plugin.getDataFolder().toPath().resolve("config.json");
     }
 
+    /** Reads config.json for a reload; fails (keeping the running one) if it is missing or broken. */
+    public PluginConfiguration readForReload() throws IOException {
+        PluginConfiguration configuration = jsonFileService.read(configPath, PluginConfiguration.class)
+                .orElseThrow(() -> new IOException("config.json is missing"));
+        configuration.normalize();
+        return configuration;
+    }
+
     public PluginConfiguration loadOrCreate() throws IOException {
         PluginConfiguration configuration = jsonFileService.read(configPath, PluginConfiguration.class).orElse(null);
         if (configuration == null) {
