@@ -20,15 +20,14 @@ Run PvP arenas on PowerNukkitX with configurable kits, protected spawn areas, an
 
 ## Quick start
 
-Build with a JDK 21 or newer. Choose either build tool.
+Build with a JDK 21 or newer.
 
 | Build tool | Command | Plugin JAR |
 | --- | --- | --- |
 | Gradle Wrapper (Windows PowerShell) | `.\gradlew.bat build` | `build/libs/ZernythFFA.jar` |
 | Gradle Wrapper (Linux/macOS) | `sh ./gradlew build` | `build/libs/ZernythFFA.jar` |
-| Maven | `mvn clean package` | `target/ZernythFFA.jar` |
 
-The Gradle Wrapper downloads the pinned Gradle version on first use. The Maven command uses a local Maven installation.
+The Gradle Wrapper downloads the pinned Gradle version on first use.
 
 1. Stop the PowerNukkitX 3.0.6 server and copy `ZernythFFA.jar` into its `plugins/` directory. When upgrading, replace the previous plugin JAR. Start the server again.
 2. In game, open `/ffaadmin` as an operator or with the `ffa.admin` permission. Follow the arena setup below, then join through `/ffa`.
@@ -100,7 +99,7 @@ Kits use item IDs such as `minecraft:iron_sword`. Replace any numeric IDs in exi
 
 ## Development
 
-Keep the Java target and dependency versions in sync between [`build.gradle.kts`](build.gradle.kts) and [`pom.xml`](pom.xml) when changing the build.
+The build is defined in [`build.gradle.kts`](build.gradle.kts); `.\gradlew.bat test` runs the tests.
 
 The Java sources use the `net.zernyth.ffa` namespace. [`FFABootstrap`](src/main/java/net/zernyth/ffa/FFABootstrap.java) wires storage, services, commands, and listeners. The [PowerNukkitX descriptor](src/main/resources/powernukkitx.yml) declares the entry point and admin permission.
 

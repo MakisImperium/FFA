@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "net.zernyth.ffa"
-version = providers.gradleProperty("releaseVersion").getOrElse("3.0.0")
+version = providers.gradleProperty("releaseVersion").getOrElse("4.0.0")
 
 repositories {
     mavenCentral()
@@ -16,12 +16,30 @@ repositories {
     }
 }
 
+// The server is a snapshot; checking it once a week instead of daily keeps builds working while
+// repo.powernukkitx.org is unreachable, which happens.
+configurations.configureEach {
+    resolutionStrategy.cacheChangingModulesFor(7, "days")
+}
+
 dependencies {
     compileOnly("org.powernukkitx:server:3.0.6-SNAPSHOT:all") {
         isTransitive = false
     }
     implementation("com.google.code.gson:gson:2.13.2")
     implementation("com.mysql:mysql-connector-j:9.4.0")
+
+    // The server classes for tests that touch PowerNukkitX types; most tests need none.
+    testImplementation("org.powernukkitx:server:3.0.6-SNAPSHOT:all") {
+        isTransitive = false
+    }
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 java {
