@@ -15,6 +15,8 @@ public final class ArenaDefinition {
     private List<SpawnPoint> spawnPoints = new ArrayList<>();
     private Map<String, CuboidZone> zones = new HashMap<>();
     private String safeZoneId;
+    /** This arena's own streak rewards ("3": [...]); empty or missing uses the server's. */
+    private Map<String, List<net.zernyth.ffa.streak.StreakReward>> streakRewards;
 
     public ArenaDefinition() {
     }
@@ -81,6 +83,10 @@ public final class ArenaDefinition {
             return Optional.empty();
         }
         return Optional.ofNullable(getZones().get(safeZoneId));
+    }
+
+    public Map<String, List<net.zernyth.ffa.streak.StreakReward>> getStreakRewards() {
+        return streakRewards;
     }
 
     public void upsertZone(String zoneId, CuboidZone zone) {

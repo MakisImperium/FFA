@@ -6,6 +6,7 @@ public final class PluginConfiguration {
     private DatabaseConfiguration database = new DatabaseConfiguration();
     private ScoreboardConfiguration scoreboard = new ScoreboardConfiguration();
     private FairnessConfiguration fairness = new FairnessConfiguration();
+    private net.zernyth.ffa.streak.StreakConfiguration streaks = new net.zernyth.ffa.streak.StreakConfiguration();
 
     public StorageBackend resolveStorageBackend() {
         return StorageBackend.fromText(storageBackend);
@@ -32,10 +33,18 @@ public final class PluginConfiguration {
         return fairness;
     }
 
+    public net.zernyth.ffa.streak.StreakConfiguration getStreaks() {
+        if (streaks == null) {
+            streaks = new net.zernyth.ffa.streak.StreakConfiguration();
+        }
+        return streaks;
+    }
+
     public void normalize() {
         getDatabase();
         getScoreboard();
         getFairness();
+        getStreaks();
     }
 }
 

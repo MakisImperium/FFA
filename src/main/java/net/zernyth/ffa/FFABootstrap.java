@@ -167,6 +167,8 @@ public final class FFABootstrap extends PluginBase {
         this.killFarmGuard = new KillFarmGuard(fairness.getFarmMaxKills(), fairness.getFarmWindowMinutes() * 60_000L, System::currentTimeMillis);
         this.killService = new KillService(arenaSessionService, playerProfileService, scoreboardService, combatTags, killFarmGuard);
         getServer().getScheduler().scheduleRepeatingTask(this, killFarmGuard::prune, 20 * 60 * 5);
+        killService.addListener(new net.zernyth.ffa.streak.StreakService(
+                arenaCatalogService, arenaSessionService, playerProfileService, () -> pluginConfiguration.getStreaks()));
         scoreboardService.addLineProvider((viewer, language) -> {
             int seconds = combatTags.remainingSeconds(viewer.getUniqueId());
             if (seconds <= 0) {
