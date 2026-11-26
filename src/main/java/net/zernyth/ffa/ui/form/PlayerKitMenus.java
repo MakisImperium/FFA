@@ -123,7 +123,11 @@ final class PlayerKitMenus extends FormSupport {
             form.addElement(new ElementButton(TextFormat.DARK_GRAY + t(player, "No kits available", "Keine Kits verfuegbar")));
         } else {
             for (KitDefinition kit : kits) {
-                form.addElement(new ElementButton(TextFormat.YELLOW + kit.getDisplayName()));
+                boolean unlocked = kitSelectionService.isUnlocked(player.getUniqueId(), kit);
+                form.addElement(new ElementButton(unlocked
+                        ? TextFormat.YELLOW + kit.getDisplayName()
+                        : TextFormat.DARK_GRAY + kit.getDisplayName() + "\n" + TextFormat.RED
+                        + t(player, "Locked - level ", "Gesperrt - Level ") + kit.getRequiredLevel()));
             }
         }
         form.addElement(new ElementButton(TextFormat.GRAY + t(player, "Back", "Zurueck")));
@@ -147,6 +151,12 @@ final class PlayerKitMenus extends FormSupport {
         }
 
         KitDefinition kit = kits.get(selected);
+        if (!kitSelectionService.isUnlocked(player.getUniqueId(), kit)) {
+            sendWarning(player, t(player, "This kit unlocks at level " + kit.getRequiredLevel() + ".",
+                    "Dieses Kit wird ab Level " + kit.getRequiredLevel() + " freigeschaltet."));
+            openPlayerKitSelect(player);
+            return;
+        }
         if (!kitSelectionService.selectKit(player.getUniqueId(), kit.getKitId())) {
             sendError(player, t(player, "Kit could not be selected.", "Kit konnte nicht gesetzt werden."));
             openPlayerKitSelect(player);

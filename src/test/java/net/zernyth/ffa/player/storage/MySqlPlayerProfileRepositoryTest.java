@@ -61,6 +61,31 @@ class MySqlPlayerProfileRepositoryTest {
         assertTrue(repository.ping());
     }
 
+    @Test
+    void storesProgressAndRanksTheSeason() throws Exception {
+        PlayerProfile kai = PlayerProfile.createDefault(UUID.randomUUID(), "Kai", true);
+        kai.getProgress().addXp(5000);
+        kai.getProgress().addCoins(77);
+        kai.getProgress().setSeason("S7", 12, 2, 5);
+        kai.getProgress().getAchievements().put("first_blood", 42L);
+        kai.getProgress().getWeeklyTasks().reset("2026-W48");
+        repository.save(kai);
+        PlayerProfile old = PlayerProfile.createDefault(UUID.randomUUID(), "Old", true);
+        old.getProgress().setSeason("S6", 99, 0, 0);
+        repository.save(old);
+
+        var loaded = repository.findByUniqueId(kai.getUniqueId()).orElseThrow().getProgress();
+        assertEquals(5000, loaded.getXp());
+        assertEquals(77, loaded.getCoins());
+        assertEquals("S7", loaded.getSeasonId());
+        assertEquals(12, loaded.getSeasonKills());
+        assertEquals(42L, loaded.getAchievements().get("first_blood"));
+        assertEquals("2026-W48", loaded.getWeeklyTasks().getPeriodKey());
+
+        assertEquals(List.of("Kai"), names(repository.findTop(LeaderboardCategory.SEASON_KILLS, 10, "S7")), "other seasons do not count");
+        assertEquals("Kai", repository.findTop(LeaderboardCategory.LEVEL, 1).get(0).getLastKnownName());
+    }
+
     private static List<String> names(List<PlayerProfile> profiles) {
         return profiles.stream().map(PlayerProfile::getLastKnownName).toList();
     }

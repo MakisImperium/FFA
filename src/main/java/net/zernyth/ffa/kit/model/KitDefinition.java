@@ -9,6 +9,8 @@ public final class KitDefinition {
     private String displayName;
     private List<KitItem> inventoryItems = new ArrayList<>();
     private ArmorSet armorSet = new ArmorSet();
+    /** Level a player needs to choose this kit; 0 or 1 = everyone. */
+    private int requiredLevel;
 
     public KitDefinition() {
     }
@@ -35,6 +37,14 @@ public final class KitDefinition {
             inventoryItems = new ArrayList<>();
         }
         return inventoryItems;
+    }
+
+    public int getRequiredLevel() {
+        return Math.max(1, requiredLevel);
+    }
+
+    public void setRequiredLevel(int requiredLevel) {
+        this.requiredLevel = Math.max(0, requiredLevel);
     }
 
     public ArmorSet getArmorSet() {

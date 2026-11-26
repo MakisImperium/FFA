@@ -69,6 +69,14 @@ public final class FFABootstrap extends PluginBase {
     private FfaFormController formController;
     private KillService killService;
     private KillFarmGuard killFarmGuard;
+    private net.zernyth.ffa.progression.ProgressionService progressionService;
+    private net.zernyth.ffa.progression.SeasonService seasonService;
+    /** Small file writes (seasons) away from the main thread. */
+    private final java.util.concurrent.ExecutorService backgroundWriter = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "ffa-writer");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Override
     public void onEnable() {
@@ -101,6 +109,12 @@ public final class FFABootstrap extends PluginBase {
         }
         if (localizationService != null) {
             localizationService.shutdown();
+        }
+        backgroundWriter.shutdown();
+        try {
+            backgroundWriter.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -169,6 +183,35 @@ public final class FFABootstrap extends PluginBase {
         getServer().getScheduler().scheduleRepeatingTask(this, killFarmGuard::prune, 20 * 60 * 5);
         killService.addListener(new net.zernyth.ffa.streak.StreakService(
                 arenaCatalogService, arenaSessionService, playerProfileService, () -> pluginConfiguration.getStreaks()));
+
+        // Progression: XP and levels, seasons, tasks, achievements, kits by level.
+        this.progressionService = new net.zernyth.ffa.progression.ProgressionService(playerProfileService, kitSelectionService,
+                () -> pluginConfiguration.getProgression(), () -> pluginConfiguration.getStreaks(), System::currentTimeMillis);
+        this.seasonService = new net.zernyth.ffa.progression.SeasonService(jsonFileService, dataPath.resolve("seasons"),
+                () -> pluginConfiguration.getProgression(), System::currentTimeMillis, backgroundWriter,
+                new net.zernyth.ffa.progression.SeasonService.Ranking() {
+                    @Override
+                    public void storedTop(String seasonId, int limit, java.util.function.Consumer<java.util.List<net.zernyth.ffa.player.model.PlayerProfile>> result) {
+                        playerProfileService.fetchTop(net.zernyth.ffa.player.model.LeaderboardCategory.SEASON_KILLS, limit, seasonId, result);
+                    }
+
+                    @Override
+                    public java.util.List<net.zernyth.ffa.player.model.PlayerProfile> online(String seasonId) {
+                        return playerProfileService.onlineSnapshot().stream()
+                                .filter(profile -> seasonId.equals(profile.getProgress().getSeasonId()))
+                                .toList();
+                    }
+                }, progressionService::onNewSeason);
+        this.seasonService.load();
+        this.seasonService.checkRollover(); // the server may have been off when the period ended
+        progressionService.setSeasons(seasonService);
+        leaderboardService.setCurrentSeason(seasonService::currentId);
+        kitSelectionService.setLevels(progressionService::level);
+        playerProfileService.addLoadListener(progressionService::onProfileLoaded);
+        killService.addListener(progressionService);
+        scoreboardService.addLineProvider(progressionService::scoreboardLines);
+        getServer().getPluginManager().registerEvents(progressionService, this);
+        getServer().getScheduler().scheduleRepeatingTask(this, seasonService::checkRollover, 20 * 60 * 5);
         scoreboardService.addLineProvider((viewer, language) -> {
             int seconds = combatTags.remainingSeconds(viewer.getUniqueId());
             if (seconds <= 0) {
@@ -200,6 +243,7 @@ public final class FFABootstrap extends PluginBase {
         getServer().getPluginManager().registerEvents(new FormInteractionListener(formController), this);
         getServer().getPluginManager().registerEvents(new ZonePlacementListener(safeZonePlacementService, formController), this);
 
+        formController.setProgressionService(progressionService, () -> pluginConfiguration.getProgression().levelCurve());
         getServer().getCommandMap().register("ffa", new FfaCommand(formController));
         getServer().getCommandMap().register("ffaadmin", new FfaAdminCommand(formController));
 

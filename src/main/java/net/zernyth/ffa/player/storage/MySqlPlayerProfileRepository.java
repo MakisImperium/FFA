@@ -31,7 +31,9 @@ import java.util.UUID;
 public final class MySqlPlayerProfileRepository implements PlayerProfileRepository {
 
     private static final String COLUMNS = "uuid, username, kills, deaths, current_killstreak, best_killstreak, " +
-            "scoreboard_enabled, language, selected_kit";
+            "scoreboard_enabled, language, selected_kit, xp, coins, season_id, season_kills, season_deaths, " +
+            "season_best_streak, extra";
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
 
     private final DatabaseConfiguration databaseConfiguration;
     private final String databaseName;
@@ -71,17 +73,24 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
     }
 
     @Override
-    public List<PlayerProfile> findTop(LeaderboardCategory category, int limit) throws Exception {
+    public List<PlayerProfile> findTop(LeaderboardCategory category, int limit, String seasonId) throws Exception {
         String order = switch (category) {
             case KILLS -> "kills DESC";
             case BEST_STREAK -> "best_killstreak DESC";
             case KD -> "(CASE WHEN deaths = 0 THEN kills ELSE kills / deaths END) DESC";
+            case LEVEL -> "xp DESC";
+            case SEASON_KILLS -> "season_kills DESC";
         };
-        String sql = "SELECT " + COLUMNS + " FROM `" + tableName + "` ORDER BY " + order + ", username ASC LIMIT ?";
+        String where = category.seasonal() ? " WHERE season_id = ?" : "";
+        String sql = "SELECT " + COLUMNS + " FROM `" + tableName + "`" + where + " ORDER BY " + order + ", username ASC LIMIT ?";
         List<PlayerProfile> profiles = new ArrayList<>();
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setInt(1, Math.max(1, limit));
+            int index = 1;
+            if (category.seasonal()) {
+                statement.setString(index++, seasonId == null ? "" : seasonId);
+            }
+            statement.setInt(index, Math.max(1, limit));
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
                     profiles.add(mapProfile(resultSet));
@@ -98,8 +107,7 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
 
     @Override
     public Optional<PlayerProfile> findByUniqueId(UUID uniqueId) throws Exception {
-        String sql = "SELECT uuid, username, kills, deaths, current_killstreak, best_killstreak, " +
-                "scoreboard_enabled, language, selected_kit FROM `" + tableName + "` WHERE uuid = ?";
+        String sql = "SELECT " + COLUMNS + " FROM `" + tableName + "` WHERE uuid = ?";
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, uniqueId.toString());
@@ -114,8 +122,7 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
 
     @Override
     public List<PlayerProfile> loadAllProfiles() throws Exception {
-        String sql = "SELECT uuid, username, kills, deaths, current_killstreak, best_killstreak, " +
-                "scoreboard_enabled, language, selected_kit FROM `" + tableName + "`";
+        String sql = "SELECT " + COLUMNS + " FROM `" + tableName + "`";
         List<PlayerProfile> profiles = new ArrayList<>();
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql);
@@ -130,11 +137,12 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
     @Override
     public void save(PlayerProfile profile) throws Exception {
         String sql = "INSERT INTO `" + tableName + "` " +
-                "(uuid, username, kills, deaths, current_killstreak, best_killstreak, scoreboard_enabled, language, selected_kit) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                "(" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE username = VALUES(username), kills = VALUES(kills), deaths = VALUES(deaths), " +
                 "current_killstreak = VALUES(current_killstreak), best_killstreak = VALUES(best_killstreak), " +
-                "scoreboard_enabled = VALUES(scoreboard_enabled), language = VALUES(language), selected_kit = VALUES(selected_kit)";
+                "scoreboard_enabled = VALUES(scoreboard_enabled), language = VALUES(language), selected_kit = VALUES(selected_kit), " +
+                "xp = VALUES(xp), coins = VALUES(coins), season_id = VALUES(season_id), season_kills = VALUES(season_kills), " +
+                "season_deaths = VALUES(season_deaths), season_best_streak = VALUES(season_best_streak), extra = VALUES(extra)";
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             PlayerStatistics statistics = profile.getStatistics();
@@ -153,6 +161,15 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
             } else {
                 statement.setString(9, profile.getSelectedKitId());
             }
+            var progress = profile.getProgress();
+            statement.setLong(10, progress.getXp());
+            statement.setLong(11, progress.getCoins());
+            statement.setString(12, progress.getSeasonId());
+            statement.setInt(13, progress.getSeasonKills());
+            statement.setInt(14, progress.getSeasonDeaths());
+            statement.setInt(15, progress.getSeasonBestStreak());
+            // Achievements, tasks, cosmetics and duels: one JSON column; the sortable numbers above win on reading.
+            statement.setString(16, GSON.toJson(progress));
             statement.executeUpdate();
         }
     }
@@ -183,6 +200,16 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
         profile.setLastKnownName(resultSet.getString("username"));
         profile.getPreferences().setScoreboardEnabled(resultSet.getBoolean("scoreboard_enabled"));
         profile.getPreferences().setLanguage(PlayerLanguage.fromCode(resultSet.getString("language")));
+
+        String extra = resultSet.getString("extra");
+        net.zernyth.ffa.player.model.PlayerProgress progress = extra == null || extra.isBlank()
+                ? new net.zernyth.ffa.player.model.PlayerProgress()
+                : GSON.fromJson(extra, net.zernyth.ffa.player.model.PlayerProgress.class);
+        progress.setXp(resultSet.getLong("xp"));
+        progress.setCoins(resultSet.getLong("coins"));
+        progress.setSeason(resultSet.getString("season_id"), resultSet.getInt("season_kills"),
+                resultSet.getInt("season_deaths"), resultSet.getInt("season_best_streak"));
+        profile.setProgress(progress);
         return profile;
     }
 
@@ -203,6 +230,72 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
             statement.execute();
         }
         ensureLanguageColumnExists();
+        migrate();
+    }
+
+    /**
+     * Numbered schema changes, applied once each and remembered in {@code <table>_schema}. Every step
+     * is safe to repeat, so a run that stopped half-way finishes on the next start.
+     */
+    private void migrate() throws SQLException {
+        String versionTable = tableName + "_schema";
+        try (Connection connection = openConnection()) {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "CREATE TABLE IF NOT EXISTS `" + versionTable + "` (version INT NOT NULL)")) {
+                statement.execute();
+            }
+            int version = 0;
+            try (PreparedStatement statement = connection.prepareStatement("SELECT MAX(version) FROM `" + versionTable + "`");
+                 ResultSet result = statement.executeQuery()) {
+                if (result.next()) {
+                    version = result.getInt(1);
+                }
+            }
+            if (version < 1) {
+                // FFA 4.0: progression, seasons and everything stored as JSON.
+                ensureColumn(connection, "xp", "BIGINT NOT NULL DEFAULT 0");
+                ensureColumn(connection, "coins", "BIGINT NOT NULL DEFAULT 0");
+                ensureColumn(connection, "season_id", "VARCHAR(32) NULL");
+                ensureColumn(connection, "season_kills", "INT NOT NULL DEFAULT 0");
+                ensureColumn(connection, "season_deaths", "INT NOT NULL DEFAULT 0");
+                ensureColumn(connection, "season_best_streak", "INT NOT NULL DEFAULT 0");
+                ensureColumn(connection, "extra", "MEDIUMTEXT NULL");
+                // Leaderboards sort by these.
+                ensureIndex(connection, "idx_ffa_kills", "kills");
+                ensureIndex(connection, "idx_ffa_best_streak", "best_killstreak");
+                ensureIndex(connection, "idx_ffa_xp", "xp");
+                ensureIndex(connection, "idx_ffa_season", "season_id, season_kills");
+                try (PreparedStatement statement = connection.prepareStatement("INSERT INTO `" + versionTable + "` (version) VALUES (1)")) {
+                    statement.execute();
+                }
+            }
+        }
+    }
+
+    private void ensureColumn(Connection connection, String column, String definition) throws SQLException {
+        try (ResultSet columns = connection.getMetaData().getColumns(connection.getCatalog(), null, tableName, column)) {
+            if (columns.next()) {
+                return;
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "ALTER TABLE `" + tableName + "` ADD COLUMN " + column + " " + definition)) {
+            statement.execute();
+        }
+    }
+
+    private void ensureIndex(Connection connection, String index, String columns) throws SQLException {
+        try (ResultSet indexes = connection.getMetaData().getIndexInfo(connection.getCatalog(), null, tableName, false, false)) {
+            while (indexes.next()) {
+                if (index.equalsIgnoreCase(indexes.getString("INDEX_NAME"))) {
+                    return;
+                }
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "CREATE INDEX " + index + " ON `" + tableName + "` (" + columns + ")")) {
+            statement.execute();
+        }
     }
 
     private void ensureLanguageColumnExists() throws SQLException {

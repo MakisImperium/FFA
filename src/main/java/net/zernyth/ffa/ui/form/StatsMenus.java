@@ -77,6 +77,35 @@ final class StatsMenus extends FormSupport {
                 "Dein eigenes Kampfprofil")));
         actions.add(PlayerStatsAction.PERSONAL);
 
+        if (root.progressionService != null) {
+            form.addElement(new ElementButton(button(player, TextFormat.GOLD,
+                    "Level & Rank",
+                    "Your XP and the next rank",
+                    "Level & Rang",
+                    "Deine EP und der naechste Rang")));
+            actions.add(PlayerStatsAction.PROGRESS);
+            form.addElement(new ElementButton(button(player, TextFormat.GREEN,
+                    "Tasks",
+                    "Daily and weekly goals",
+                    "Aufgaben",
+                    "Taegliche und woechentliche Ziele")));
+            actions.add(PlayerStatsAction.TASKS);
+            form.addElement(new ElementButton(button(player, TextFormat.LIGHT_PURPLE,
+                    "Achievements",
+                    "What you have unlocked",
+                    "Erfolge",
+                    "Was du freigeschaltet hast")));
+            actions.add(PlayerStatsAction.ACHIEVEMENTS);
+            if (root.progressionService.currentSeasonId() != null) {
+                form.addElement(new ElementButton(button(player, TextFormat.AQUA,
+                        "Season",
+                        "This season's best and past seasons",
+                        "Saison",
+                        "Die Besten der Saison und vergangene Saisons")));
+                actions.add(PlayerStatsAction.SEASON);
+            }
+        }
+
         form.addElement(new ElementButton(button(player, TextFormat.YELLOW,
                 "Global Leaderboard",
                 "Top players from stored database stats",
@@ -113,8 +142,141 @@ final class StatsMenus extends FormSupport {
             case PERSONAL -> openPlayerStatsOverview(player);
             case GLOBAL -> openPlayerGlobalLeaderboard(player);
             case ARENA -> openPlayerArenaLeaderboard(player);
+            case PROGRESS -> openProgress(player);
+            case TASKS -> openTasks(player);
+            case ACHIEVEMENTS -> openAchievements(player);
+            case SEASON -> openSeason(player);
             case BACK -> root.playerMenus.openPlayerMain(player);
         }
+    }
+
+    void openProgress(Player player) {
+        var progression = root.progressionService;
+        var profile = playerProfileService.getProfile(player.getUniqueId());
+        if (progression == null || profile.isEmpty()) {
+            openPlayerStats(player);
+            return;
+        }
+        var progress = profile.get().getProgress();
+        int level = progression.level(profile.get());
+        var curve = progressionConfigCurve();
+        long[] within = curve.progressInLevel(progress.getXp());
+        StringBuilder content = new StringBuilder();
+        content.append(TextFormat.DARK_GRAY).append(t(player, "Rank: ", "Rang: ")).append(progression.rank(level).display()).append("\n")
+                .append(TextFormat.DARK_GRAY).append("Level: ").append(TextFormat.WHITE).append(level).append("\n")
+                .append(TextFormat.DARK_GRAY).append(t(player, "XP: ", "EP: ")).append(TextFormat.WHITE).append(progress.getXp()).append("\n");
+        if (within[1] > 0) {
+            int filled = (int) Math.round(20.0 * within[0] / within[1]);
+            content.append(TextFormat.GREEN).append("|".repeat(filled)).append(TextFormat.DARK_GRAY).append("|".repeat(20 - filled))
+                    .append(TextFormat.GRAY).append(" ").append(within[0]).append("/").append(within[1]).append("\n");
+        } else {
+            content.append(TextFormat.GOLD).append(t(player, "Maximum level reached.", "Hoechstes Level erreicht.")).append("\n");
+        }
+        content.append(TextFormat.DARK_GRAY).append(t(player, "Coins: ", "Muenzen: ")).append(TextFormat.YELLOW).append(progress.getCoins()).append("\n")
+                .append(TextFormat.DARK_GRAY).append(t(player, "Shutdowns: ", "Shutdowns: ")).append(TextFormat.WHITE).append(progress.getShutdowns()).append("\n")
+                .append(TextFormat.DARK_GRAY).append(t(player, "Duels won: ", "Duelle gewonnen: ")).append(TextFormat.WHITE).append(progress.getDuelWins());
+        SimpleForm form = new SimpleForm(title(player, "Level & Rank", "Level & Rang"), content.toString());
+        form.addElement(new ElementButton(TextFormat.GRAY + t(player, "Back", "Zurueck")));
+        form.send(player, FORM_PLAYER_PROGRESS);
+    }
+
+    private net.zernyth.ffa.progression.LevelCurve progressionConfigCurve() {
+        return root.progressionCurve.get();
+    }
+
+    void openTasks(Player player) {
+        var progression = root.progressionService;
+        var profile = playerProfileService.getProfile(player.getUniqueId());
+        if (progression == null || profile.isEmpty()) {
+            openPlayerStats(player);
+            return;
+        }
+        boolean german = playerProfileService.getLanguage(player.getUniqueId()) == net.zernyth.ffa.player.model.PlayerLanguage.GERMAN;
+        var progress = profile.get().getProgress();
+        StringBuilder content = new StringBuilder();
+        appendTasks(content, t(player, "Today", "Heute"), progression.dailyTasks(player.getUniqueId()), progress.getDailyTasks(), german);
+        appendTasks(content, t(player, "This week", "Diese Woche"), progression.weeklyTasks(player.getUniqueId()), progress.getWeeklyTasks(), german);
+        if (content.isEmpty()) {
+            content.append(TextFormat.GRAY).append(t(player, "No tasks right now.", "Gerade keine Aufgaben."));
+        }
+        SimpleForm form = new SimpleForm(title(player, "Tasks", "Aufgaben"), content.toString().trim());
+        form.addElement(new ElementButton(TextFormat.GRAY + t(player, "Back", "Zurueck")));
+        form.send(player, FORM_PLAYER_TASKS);
+    }
+
+    private void appendTasks(StringBuilder content, String heading, List<net.zernyth.ffa.progression.TaskDefinition> tasks,
+                             net.zernyth.ffa.player.model.PlayerProgress.TaskState state, boolean german) {
+        if (tasks.isEmpty()) {
+            return;
+        }
+        content.append(TextFormat.GOLD).append(heading).append("\n");
+        for (var task : tasks) {
+            boolean done = state.getCompleted().contains(task.getId());
+            int value = Math.min(state.getProgress().getOrDefault(task.getId(), 0), task.getTarget());
+            content.append(done ? TextFormat.GREEN + "[x] " : TextFormat.GRAY + "[ ] ")
+                    .append(TextFormat.WHITE).append(task.name(german))
+                    .append(TextFormat.DARK_GRAY).append("  ").append(value).append("/").append(task.getTarget())
+                    .append(TextFormat.GRAY).append("  +").append(task.getXp()).append(german ? " EP" : " XP")
+                    .append(task.getCoins() > 0 ? ", +" + task.getCoins() + (german ? " Muenzen" : " coins") : "")
+                    .append("\n");
+        }
+        content.append("\n");
+    }
+
+    void openAchievements(Player player) {
+        var progression = root.progressionService;
+        var profile = playerProfileService.getProfile(player.getUniqueId());
+        if (progression == null || profile.isEmpty()) {
+            openPlayerStats(player);
+            return;
+        }
+        boolean german = playerProfileService.getLanguage(player.getUniqueId()) == net.zernyth.ffa.player.model.PlayerLanguage.GERMAN;
+        var unlocked = profile.get().getProgress().getAchievements();
+        var all = progression.achievements();
+        StringBuilder content = new StringBuilder();
+        content.append(TextFormat.GRAY).append(unlocked.size()).append(" / ").append(all.size()).append("\n\n");
+        for (var achievement : all) {
+            boolean has = unlocked.containsKey(achievement.getId());
+            content.append(has ? TextFormat.LIGHT_PURPLE + "* " + TextFormat.WHITE : TextFormat.DARK_GRAY + "- ")
+                    .append(achievement.name(german))
+                    .append(achievement.getCoins() > 0 ? TextFormat.GRAY + "  (" + achievement.getCoins() + (german ? " Muenzen)" : " coins)") : "")
+                    .append("\n");
+        }
+        SimpleForm form = new SimpleForm(title(player, "Achievements", "Erfolge"), content.toString().trim());
+        form.addElement(new ElementButton(TextFormat.GRAY + t(player, "Back", "Zurueck")));
+        form.send(player, FORM_PLAYER_ACHIEVEMENTS);
+    }
+
+    void openSeason(Player player) {
+        var progression = root.progressionService;
+        if (progression == null || progression.currentSeasonId() == null) {
+            openPlayerStats(player);
+            return;
+        }
+        var seasons = progression.seasons();
+        StringBuilder content = new StringBuilder();
+        content.append(TextFormat.GOLD).append(t(player, "Season ", "Saison ")).append(seasons.currentNumber())
+                .append(TextFormat.GRAY).append(t(player, " since ", " seit "))
+                .append(java.time.LocalDate.ofInstant(java.time.Instant.ofEpochMilli(seasons.startedAt()), java.time.ZoneId.systemDefault()))
+                .append("\n\n");
+        appendLeaderboardSection(content, t(player, "Season Kills", "Saison-Kills"),
+                leaderboardService.top(LeaderboardCategory.SEASON_KILLS, 10),
+                profile -> profile.getProgress().getSeasonKills());
+        var archive = seasons.archive();
+        for (int i = archive.size() - 1; i >= Math.max(0, archive.size() - 3); i--) {
+            var past = archive.get(i);
+            content.append(TextFormat.AQUA).append(t(player, "Season ", "Saison ")).append(past.number())
+                    .append(TextFormat.GRAY).append(t(player, " - winners", " - Sieger")).append("\n");
+            int place = 1;
+            for (var entry : past.top().subList(0, Math.min(3, past.top().size()))) {
+                content.append(TextFormat.WHITE).append(place++).append(". ").append(entry.name())
+                        .append(TextFormat.GRAY).append(" ").append(entry.kills()).append(" Kills").append("\n");
+            }
+            content.append("\n");
+        }
+        SimpleForm form = new SimpleForm(title(player, "Season", "Saison"), content.toString().trim());
+        form.addElement(new ElementButton(TextFormat.GRAY + t(player, "Back", "Zurueck")));
+        form.send(player, FORM_PLAYER_SEASON);
     }
 
     void openPlayerStatsOverview(Player player) {
@@ -164,6 +326,14 @@ final class StatsMenus extends FormSupport {
                 leaderboardService.top(LeaderboardCategory.KD, 10),
                 profile -> String.format(Locale.ROOT, "%.2f", kdOf(profile.getStatistics()))
         );
+        if (root.progressionService != null) {
+            appendLeaderboardSection(
+                    content,
+                    t(player, "Top Level", "Top Level"),
+                    leaderboardService.top(LeaderboardCategory.LEVEL, 10),
+                    profile -> root.progressionService.level(profile)
+            );
+        }
 
         if (content.isEmpty()) {
             content.append(TextFormat.GRAY).append(t(player, "No leaderboard data available.", "Keine Leaderboard-Daten verfuegbar."));
@@ -275,6 +445,10 @@ final class StatsMenus extends FormSupport {
         PERSONAL,
         GLOBAL,
         ARENA,
+        PROGRESS,
+        TASKS,
+        ACHIEVEMENTS,
+        SEASON,
         BACK
     }
 }

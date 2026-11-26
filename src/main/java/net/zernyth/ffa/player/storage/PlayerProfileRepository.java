@@ -20,7 +20,16 @@ public interface PlayerProfileRepository extends AutoCloseable {
      * fine for files; a database answers it with one ordered, limited query.
      */
     default List<PlayerProfile> findTop(LeaderboardCategory category, int limit) throws Exception {
-        return loadAllProfiles().stream().sorted(category.comparator()).limit(limit).toList();
+        return findTop(category, limit, null);
+    }
+
+    /** As above; for a seasonal category only profiles of {@code seasonId} take part. */
+    default List<PlayerProfile> findTop(LeaderboardCategory category, int limit, String seasonId) throws Exception {
+        return loadAllProfiles().stream()
+                .filter(profile -> !category.seasonal() || (seasonId != null && seasonId.equals(profile.getProgress().getSeasonId())))
+                .sorted(category.comparator())
+                .limit(limit)
+                .toList();
     }
 
     default boolean ping() throws Exception {

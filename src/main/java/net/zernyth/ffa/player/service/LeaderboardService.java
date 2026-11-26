@@ -23,6 +23,7 @@ public final class LeaderboardService {
 
     private final PlayerProfileService profiles;
     private final Map<LeaderboardCategory, List<PlayerProfile>> stored = new EnumMap<>(LeaderboardCategory.class);
+    private java.util.function.Supplier<String> currentSeason = () -> null;
 
     public LeaderboardService(PlayerProfileService profiles) {
         this.profiles = profiles;
@@ -31,10 +32,17 @@ public final class LeaderboardService {
         }
     }
 
+    public void setCurrentSeason(java.util.function.Supplier<String> currentSeason) {
+        this.currentSeason = currentSeason;
+    }
+
     /** Asks storage for fresh top lists; returns at once. */
     public void refresh() {
         for (LeaderboardCategory category : LeaderboardCategory.values()) {
-            profiles.fetchTop(category, DEPTH, top -> {
+            if (category.seasonal() && currentSeason.get() == null) {
+                continue;
+            }
+            profiles.fetchTop(category, DEPTH, category.seasonal() ? currentSeason.get() : null, top -> {
                 synchronized (stored) {
                     stored.put(category, List.copyOf(top));
                 }
@@ -44,6 +52,10 @@ public final class LeaderboardService {
 
     /** The best {@code limit} profiles for a category, stored and online together. */
     public List<PlayerProfile> top(LeaderboardCategory category, int limit) {
+        String season = category.seasonal() ? currentSeason.get() : null;
+        if (category.seasonal() && season == null) {
+            return List.of();
+        }
         Map<UUID, PlayerProfile> merged = new LinkedHashMap<>();
         synchronized (stored) {
             for (PlayerProfile profile : stored.get(category)) {
@@ -52,6 +64,9 @@ public final class LeaderboardService {
         }
         for (PlayerProfile online : profiles.onlineSnapshot()) {
             merged.put(online.getUniqueId(), online);
+        }
+        if (season != null) {
+            merged.values().removeIf(profile -> !season.equals(profile.getProgress().getSeasonId()));
         }
         List<PlayerProfile> all = new ArrayList<>(merged.values());
         all.sort(category.comparator());

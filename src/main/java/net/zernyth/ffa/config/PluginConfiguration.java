@@ -7,6 +7,7 @@ public final class PluginConfiguration {
     private ScoreboardConfiguration scoreboard = new ScoreboardConfiguration();
     private FairnessConfiguration fairness = new FairnessConfiguration();
     private net.zernyth.ffa.streak.StreakConfiguration streaks = new net.zernyth.ffa.streak.StreakConfiguration();
+    private net.zernyth.ffa.progression.ProgressionConfiguration progression = new net.zernyth.ffa.progression.ProgressionConfiguration();
 
     public StorageBackend resolveStorageBackend() {
         return StorageBackend.fromText(storageBackend);
@@ -40,11 +41,19 @@ public final class PluginConfiguration {
         return streaks;
     }
 
+    public net.zernyth.ffa.progression.ProgressionConfiguration getProgression() {
+        if (progression == null) {
+            progression = new net.zernyth.ffa.progression.ProgressionConfiguration();
+        }
+        return progression;
+    }
+
     public void normalize() {
         getDatabase();
         getScoreboard();
         getFairness();
         getStreaks();
+        getProgression();
     }
 }
 

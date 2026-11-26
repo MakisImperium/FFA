@@ -9,6 +9,7 @@ public final class PlayerProfile {
     private PlayerStatistics statistics = new PlayerStatistics();
     private PlayerPreferences preferences = new PlayerPreferences();
     private String selectedKitId;
+    private PlayerProgress progress = new PlayerProgress();
 
     public static PlayerProfile createDefault(UUID uniqueId, String playerName, boolean scoreboardEnabledByDefault) {
         PlayerProfile profile = new PlayerProfile();
@@ -49,6 +50,17 @@ public final class PlayerProfile {
             preferences = new PlayerPreferences();
         }
         return preferences;
+    }
+
+    public PlayerProgress getProgress() {
+        if (progress == null) {
+            progress = new PlayerProgress();
+        }
+        return progress;
+    }
+
+    public void setProgress(PlayerProgress progress) {
+        this.progress = progress;
     }
 
     public String getSelectedKitId() {

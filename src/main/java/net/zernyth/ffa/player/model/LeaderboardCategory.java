@@ -7,12 +7,21 @@ import java.util.function.ToDoubleFunction;
 public enum LeaderboardCategory {
     KILLS(profile -> profile.getStatistics().getKills()),
     BEST_STREAK(profile -> profile.getStatistics().getBestKillstreak()),
-    KD(profile -> kd(profile.getStatistics()));
+    KD(profile -> kd(profile.getStatistics())),
+    /** By XP, which is the same order as by level. */
+    LEVEL(profile -> profile.getProgress().getXp()),
+    /** Kills in the current season; callers only pass profiles of that season. */
+    SEASON_KILLS(profile -> profile.getProgress().getSeasonKills());
 
     private final ToDoubleFunction<PlayerProfile> value;
 
     LeaderboardCategory(ToDoubleFunction<PlayerProfile> value) {
         this.value = value;
+    }
+
+    /** Whether this ranking only counts the current season. */
+    public boolean seasonal() {
+        return this == SEASON_KILLS;
     }
 
     public double valueOf(PlayerProfile profile) {

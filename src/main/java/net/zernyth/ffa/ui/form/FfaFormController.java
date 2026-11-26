@@ -64,6 +64,16 @@ public final class FfaFormController implements FormIds {
     final FfaScoreboardService scoreboardService;
     final LocalizationService localizationService;
     final KillService killService;
+    /** Set once progression is wired up; the stats menus read levels, tasks and seasons from it. */
+    net.zernyth.ffa.progression.ProgressionService progressionService;
+
+    java.util.function.Supplier<net.zernyth.ffa.progression.LevelCurve> progressionCurve;
+
+    public void setProgressionService(net.zernyth.ffa.progression.ProgressionService progressionService,
+                                      java.util.function.Supplier<net.zernyth.ffa.progression.LevelCurve> curve) {
+        this.progressionService = progressionService;
+        this.progressionCurve = curve;
+    }
 
     final PlayerMenus playerMenus;
     final PlayerKitMenus playerKitMenus;
@@ -131,7 +141,8 @@ public final class FfaFormController implements FormIds {
             case FORM_PLAYER_KIT_SELECT -> playerKitMenus.handlePlayerKitSelect(player, response);
             case FORM_PLAYER_KIT_CURRENT -> playerKitMenus.openPlayerKitMenu(player);
             case FORM_PLAYER_STATS -> statsMenus.handlePlayerStatsMenu(player, response);
-            case FORM_PLAYER_STATS_OVERVIEW, FORM_PLAYER_STATS_GLOBAL, FORM_PLAYER_STATS_ARENA -> statsMenus.openPlayerStats(player);
+            case FORM_PLAYER_STATS_OVERVIEW, FORM_PLAYER_STATS_GLOBAL, FORM_PLAYER_STATS_ARENA, FORM_PLAYER_PROGRESS, FORM_PLAYER_TASKS,
+                    FORM_PLAYER_ACHIEVEMENTS, FORM_PLAYER_SEASON -> statsMenus.openPlayerStats(player);
             case FORM_PLAYER_STATS_UNAVAILABLE -> playerMenus.openPlayerMain(player);
             case FORM_PLAYER_SETTINGS -> settingsMenus.handlePlayerSettings(player, response);
             case FORM_PLAYER_ARENA_JOINED -> playerMenus.handleArenaJoinedForm(player, response);
@@ -174,7 +185,8 @@ public final class FfaFormController implements FormIds {
                     playerMenus.openPlayerMain(player);
                 }
             }
-            case FORM_PLAYER_STATS_OVERVIEW, FORM_PLAYER_STATS_GLOBAL, FORM_PLAYER_STATS_ARENA -> statsMenus.openPlayerStats(player);
+            case FORM_PLAYER_STATS_OVERVIEW, FORM_PLAYER_STATS_GLOBAL, FORM_PLAYER_STATS_ARENA, FORM_PLAYER_PROGRESS, FORM_PLAYER_TASKS,
+                    FORM_PLAYER_ACHIEVEMENTS, FORM_PLAYER_SEASON -> statsMenus.openPlayerStats(player);
             case FORM_PLAYER_STATS_UNAVAILABLE -> playerMenus.openPlayerMain(player);
             case FORM_PLAYER_ARENA_MENU, FORM_PLAYER_KIT_MENU, FORM_PLAYER_STATS, FORM_PLAYER_SETTINGS -> playerMenus.openPlayerMain(player);
             case FORM_ADMIN_ARENA_CREATE, FORM_ADMIN_ARENA_DELETE, FORM_ADMIN_ARENA_ADD_SPAWN,

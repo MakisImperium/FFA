@@ -61,6 +61,8 @@ public final class PlayerProfileService {
     private final ExecutorService io;
     private final AtomicBoolean outageSignalSent = new AtomicBoolean(false);
     private final AtomicBoolean pinging = new AtomicBoolean(false);
+    /** Told on the main thread whenever a profile has arrived (season and task periods hook in here). */
+    private final List<Consumer<UUID>> loadListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile boolean dataAvailable = true;
 
     public PlayerProfileService(
@@ -125,9 +127,14 @@ public final class PlayerProfileService {
                 }
                 loadingGeneration.remove(uniqueId);
                 profilesById.put(uniqueId, result);
+                loadListeners.forEach(listener -> listener.accept(uniqueId));
                 onLoaded.accept(result);
             });
         });
+    }
+
+    public void addLoadListener(Consumer<UUID> listener) {
+        loadListeners.add(listener);
     }
 
     /** True once the real profile is there; false while it loads or when the player is not online. */
@@ -168,12 +175,17 @@ public final class PlayerProfileService {
      * gets them on the calling thread of the IO queue, not the main thread - the result is plain data.
      */
     public void fetchTop(LeaderboardCategory category, int limit, Consumer<List<PlayerProfile>> onResult) {
+        fetchTop(category, limit, null, onResult);
+    }
+
+    /** As above; a seasonal category only ranks profiles of {@code seasonId}. */
+    public void fetchTop(LeaderboardCategory category, int limit, String seasonId, Consumer<List<PlayerProfile>> onResult) {
         if (strictDataDependency && !dataAvailable) {
             return;
         }
         io.execute(() -> {
             try {
-                onResult.accept(repository.findTop(category, limit));
+                onResult.accept(repository.findTop(category, limit, seasonId));
             } catch (Exception exception) {
                 handleRepositoryFailure("load the " + category + " leaderboard", exception);
             }
