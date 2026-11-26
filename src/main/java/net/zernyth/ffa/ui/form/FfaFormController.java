@@ -29,6 +29,8 @@ import net.zernyth.ffa.messaging.FfaMessageFormatter;
 import net.zernyth.ffa.player.model.PlayerLanguage;
 import net.zernyth.ffa.player.model.PlayerProfile;
 import net.zernyth.ffa.player.model.PlayerStatistics;
+import net.zernyth.ffa.player.model.LeaderboardCategory;
+import net.zernyth.ffa.player.service.LeaderboardService;
 import net.zernyth.ffa.player.service.PlayerProfileService;
 import net.zernyth.ffa.scoreboard.FfaScoreboardService;
 
@@ -92,6 +94,7 @@ public final class FfaFormController {
     private final KitSelectionService kitSelectionService;
     private final KitApplicationService kitApplicationService;
     private final PlayerProfileService playerProfileService;
+    private final LeaderboardService leaderboardService;
     private final FfaScoreboardService scoreboardService;
     private final LocalizationService localizationService;
 
@@ -113,9 +116,11 @@ public final class FfaFormController {
             KitSelectionService kitSelectionService,
             KitApplicationService kitApplicationService,
             PlayerProfileService playerProfileService,
+            LeaderboardService leaderboardService,
             FfaScoreboardService scoreboardService,
             LocalizationService localizationService
     ) {
+        this.leaderboardService = leaderboardService;
         this.arenaCatalogService = arenaCatalogService;
         this.arenaSessionService = arenaSessionService;
         this.safeZonePlacementService = safeZonePlacementService;
@@ -747,34 +752,25 @@ public final class FfaFormController {
             return;
         }
 
-        List<PlayerProfile> profiles = playerProfileService.loadAllProfilesSnapshot();
+        // From the cache: refreshed in the background every minute, merged with who is online now.
         StringBuilder content = new StringBuilder();
 
         appendLeaderboardSection(
                 content,
                 t(player, "Top Kills", "Top Kills"),
-                profiles.stream()
-                        .sorted(Comparator.comparingInt((PlayerProfile profile) -> profile.getStatistics().getKills()).reversed())
-                        .limit(10)
-                        .toList(),
+                leaderboardService.top(LeaderboardCategory.KILLS, 10),
                 profile -> profile.getStatistics().getKills()
         );
         appendLeaderboardSection(
                 content,
                 t(player, "Top Streak", "Top Streak"),
-                profiles.stream()
-                        .sorted(Comparator.comparingInt((PlayerProfile profile) -> profile.getStatistics().getBestKillstreak()).reversed())
-                        .limit(10)
-                        .toList(),
+                leaderboardService.top(LeaderboardCategory.BEST_STREAK, 10),
                 profile -> profile.getStatistics().getBestKillstreak()
         );
         appendLeaderboardSection(
                 content,
                 t(player, "Top K/D", "Top K/D"),
-                profiles.stream()
-                        .sorted(Comparator.comparingDouble((PlayerProfile profile) -> kdOf(profile.getStatistics())).reversed())
-                        .limit(10)
-                        .toList(),
+                leaderboardService.top(LeaderboardCategory.KD, 10),
                 profile -> String.format(Locale.ROOT, "%.2f", kdOf(profile.getStatistics()))
         );
 
@@ -803,15 +799,10 @@ public final class FfaFormController {
         String arenaId = arenaIdOptional.get();
         String arenaName = resolveArenaName(player, arenaId);
         List<UUID> arenaPlayers = new ArrayList<>(arenaSessionService.getPlayersInArena(arenaId));
-        List<PlayerProfile> snapshots = playerProfileService.loadAllProfilesSnapshot();
-        Map<UUID, PlayerProfile> profilesById = new ConcurrentHashMap<>();
-        for (PlayerProfile snapshot : snapshots) {
-            profilesById.put(snapshot.getUniqueId(), snapshot);
-        }
-
+        // Everyone in an arena is online, so their profiles are in memory: no storage access needed.
         List<PlayerProfile> arenaProfiles = arenaPlayers.stream()
-                .map(profilesById::get)
-                .filter(profile -> profile != null)
+                .map(playerProfileService::getProfile)
+                .flatMap(Optional::stream)
                 .toList();
 
         StringBuilder content = new StringBuilder();

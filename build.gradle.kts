@@ -28,6 +28,11 @@ dependencies {
     }
     implementation("com.google.code.gson:gson:2.13.2")
     implementation("com.mysql:mysql-connector-j:9.4.0")
+    // Connection pool for MySQL. SLF4J comes with the server, so the plugin does not ship a second copy.
+    implementation("com.zaxxer:HikariCP:6.3.3") {
+        exclude(group = "org.slf4j")
+    }
+    testImplementation("org.slf4j:slf4j-api:2.0.16")
 
     // The server classes for tests that touch PowerNukkitX types; most tests need none.
     testImplementation("org.powernukkitx:server:3.0.6-SNAPSHOT:all") {

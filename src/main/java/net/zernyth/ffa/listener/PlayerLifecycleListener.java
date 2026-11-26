@@ -45,8 +45,12 @@ public final class PlayerLifecycleListener implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        playerProfileService.loadProfile(player);
-        scoreboardService.handleJoin(player);
+        // The profile arrives from storage in the background; the scoreboard depends on its settings.
+        playerProfileService.loadProfile(player, profile -> {
+            if (player.isOnline()) {
+                scoreboardService.handleJoin(player);
+            }
+        });
     }
 
     @EventHandler

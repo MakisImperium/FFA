@@ -1,86 +1,149 @@
 package net.zernyth.ffa.player.service;
 
-import org.powernukkitx.Player;
-import org.powernukkitx.plugin.PluginBase;
+import com.google.gson.Gson;
+import net.zernyth.ffa.player.model.LeaderboardCategory;
 import net.zernyth.ffa.player.model.PlayerLanguage;
 import net.zernyth.ffa.player.model.PlayerProfile;
 import net.zernyth.ffa.player.model.PlayerStatistics;
 import net.zernyth.ffa.player.storage.PlayerProfileRepository;
+import org.powernukkitx.Player;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
+/**
+ * Player profiles in memory, with every file and database access off the main thread.
+ *
+ * <p>All repository work runs on one background thread, in the order it was asked for. That keeps
+ * the order per player for free: a save queued when a player leaves runs before the load queued
+ * when they come straight back, so they never get yesterday's numbers. Results that touch the game
+ * come back through {@code mainThread}.
+ *
+ * <p>While a profile loads the player holds a placeholder. It is never saved - saving it would
+ * overwrite the real profile with zeros - and anything that changes stats waits until the real one
+ * is there ({@link #isLoaded}).
+ */
 public final class PlayerProfileService {
 
-    private final PluginBase plugin;
+    /** Where failures are reported; the plugin logger in production. */
+    public interface ErrorReporter {
+        void error(String message, Throwable cause);
+    }
+
+    private static final Gson COPIER = new Gson();
+
     private final PlayerProfileRepository repository;
+    private final ErrorReporter errors;
+    private final Executor mainThread;
     private final boolean scoreboardEnabledByDefault;
     private final boolean strictDataDependency;
     private final Runnable repositoryUnavailableCallback;
-    private final Map<UUID, PlayerProfile> profilesById = new ConcurrentHashMap<>();
 
-    private final Object repositoryLock = new Object();
+    private final Map<UUID, PlayerProfile> profilesById = new ConcurrentHashMap<>();
+    /** Players whose profile is still on its way; the value identifies the load, so a stale one is ignored. */
+    private final Map<UUID, Long> loadingGeneration = new ConcurrentHashMap<>();
+    private final AtomicLong generations = new AtomicLong();
+
     private final Map<UUID, PlayerProfile> pendingPersistence = new ConcurrentHashMap<>();
     private final Set<UUID> queuedPersistenceIds = ConcurrentHashMap.newKeySet();
-    private final LinkedBlockingQueue<UUID> persistenceQueue = new LinkedBlockingQueue<>();
-    private final AtomicBoolean workerRunning = new AtomicBoolean(true);
+    private final ExecutorService io;
     private final AtomicBoolean outageSignalSent = new AtomicBoolean(false);
-    private final Thread persistenceWorker;
+    private final AtomicBoolean pinging = new AtomicBoolean(false);
     private volatile boolean dataAvailable = true;
 
     public PlayerProfileService(
-            PluginBase plugin,
             PlayerProfileRepository repository,
+            ErrorReporter errors,
+            Executor mainThread,
             boolean scoreboardEnabledByDefault,
             boolean strictDataDependency,
             Runnable repositoryUnavailableCallback
     ) {
-        this.plugin = plugin;
         this.repository = repository;
+        this.errors = errors;
+        this.mainThread = mainThread;
         this.scoreboardEnabledByDefault = scoreboardEnabledByDefault;
         this.strictDataDependency = strictDataDependency;
         this.repositoryUnavailableCallback = repositoryUnavailableCallback;
-        this.persistenceWorker = new Thread(this::runPersistenceWorker, "ffa-profile-persistence");
-        this.persistenceWorker.setDaemon(true);
-        this.persistenceWorker.start();
+        this.io = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "ffa-profile-io");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
-    public PlayerProfile loadProfile(Player player) {
-        UUID uniqueId = player.getUniqueId();
-        if (strictDataDependency && !dataAvailable) {
-            PlayerProfile fallback = PlayerProfile.createDefault(uniqueId, player.getName(), scoreboardEnabledByDefault);
-            fallback.setLastKnownName(player.getName());
-            profilesById.put(uniqueId, fallback);
-            return fallback;
-        }
+    // --- loading --------------------------------------------------------------------------------
 
-        PlayerProfile profile;
-        try {
-            synchronized (repositoryLock) {
-                profile = repository.findByUniqueId(uniqueId)
-                        .orElseGet(() -> PlayerProfile.createDefault(uniqueId, player.getName(), scoreboardEnabledByDefault));
-            }
-        } catch (Exception exception) {
-            handleRepositoryFailure("load profile for " + player.getName(), exception);
-            profile = PlayerProfile.createDefault(uniqueId, player.getName(), scoreboardEnabledByDefault);
+    /** Starts loading a joining player's profile; returns at once. */
+    public void loadProfile(Player player) {
+        loadProfile(player.getUniqueId(), player.getName(), profile -> { });
+    }
+
+    /** As above, then runs {@code onLoaded} on the main thread once the real profile is in place. */
+    public void loadProfile(Player player, Consumer<PlayerProfile> onLoaded) {
+        loadProfile(player.getUniqueId(), player.getName(), onLoaded);
+    }
+
+    public void loadProfile(UUID uniqueId, String playerName, Consumer<PlayerProfile> onLoaded) {
+        PlayerProfile placeholder = PlayerProfile.createDefault(uniqueId, playerName, scoreboardEnabledByDefault);
+        if (strictDataDependency && !dataAvailable) {
+            profilesById.put(uniqueId, placeholder);
+            loadingGeneration.remove(uniqueId);
+            onLoaded.accept(placeholder);
+            return;
         }
-        profile.setLastKnownName(player.getName());
-        profilesById.put(uniqueId, profile);
-        return profile;
+        long generation = generations.incrementAndGet();
+        loadingGeneration.put(uniqueId, generation);
+        profilesById.put(uniqueId, placeholder);
+        io.execute(() -> {
+            PlayerProfile loaded;
+            try {
+                loaded = repository.findByUniqueId(uniqueId)
+                        .orElseGet(() -> PlayerProfile.createDefault(uniqueId, playerName, scoreboardEnabledByDefault));
+            } catch (Exception exception) {
+                handleRepositoryFailure("load profile for " + playerName, exception);
+                loaded = PlayerProfile.createDefault(uniqueId, playerName, scoreboardEnabledByDefault);
+            }
+            PlayerProfile result = loaded;
+            result.setLastKnownName(playerName);
+            mainThread.execute(() -> {
+                // Left again, or joined again with a newer load: this result is not wanted any more.
+                if (!Long.valueOf(generation).equals(loadingGeneration.get(uniqueId))) {
+                    return;
+                }
+                loadingGeneration.remove(uniqueId);
+                profilesById.put(uniqueId, result);
+                onLoaded.accept(result);
+            });
+        });
+    }
+
+    /** True once the real profile is there; false while it loads or when the player is not online. */
+    public boolean isLoaded(UUID uniqueId) {
+        return profilesById.containsKey(uniqueId) && !loadingGeneration.containsKey(uniqueId);
     }
 
     public void unloadProfile(Player player, boolean persist) {
-        PlayerProfile profile = profilesById.remove(player.getUniqueId());
-        if (persist && profile != null) {
+        unloadProfile(player.getUniqueId(), persist);
+    }
+
+    public void unloadProfile(UUID uniqueId, boolean persist) {
+        boolean wasLoading = loadingGeneration.remove(uniqueId) != null;
+        PlayerProfile profile = profilesById.remove(uniqueId);
+        // A placeholder is never saved: it would overwrite the stored profile with zeros.
+        if (persist && profile != null && !wasLoading) {
             persistProfile(profile);
         }
     }
@@ -89,29 +152,35 @@ public final class PlayerProfileService {
         return Optional.ofNullable(profilesById.get(uniqueId));
     }
 
-    public List<PlayerProfile> loadAllProfilesSnapshot() {
-        if (strictDataDependency && !dataAvailable) {
-            return new ArrayList<>(profilesById.values());
-        }
-
-        Map<UUID, PlayerProfile> merged = new HashMap<>();
-        try {
-            List<PlayerProfile> storedProfiles;
-            synchronized (repositoryLock) {
-                storedProfiles = repository.loadAllProfiles();
+    /** The profiles of everyone online with a loaded profile; copies, safe to sort and keep. */
+    public List<PlayerProfile> onlineSnapshot() {
+        List<PlayerProfile> out = new ArrayList<>();
+        profilesById.forEach((id, profile) -> {
+            if (!loadingGeneration.containsKey(id)) {
+                out.add(copy(profile));
             }
-            for (PlayerProfile stored : storedProfiles) {
-                merged.put(stored.getUniqueId(), stored);
-            }
-        } catch (Exception exception) {
-            handleRepositoryFailure("load global leaderboard profiles from repository", exception);
-        }
-
-        for (PlayerProfile cached : profilesById.values()) {
-            merged.put(cached.getUniqueId(), cached);
-        }
-        return new ArrayList<>(merged.values());
+        });
+        return out;
     }
+
+    /**
+     * The best {@code limit} stored profiles for a category, read in the background; {@code onResult}
+     * gets them on the calling thread of the IO queue, not the main thread - the result is plain data.
+     */
+    public void fetchTop(LeaderboardCategory category, int limit, Consumer<List<PlayerProfile>> onResult) {
+        if (strictDataDependency && !dataAvailable) {
+            return;
+        }
+        io.execute(() -> {
+            try {
+                onResult.accept(repository.findTop(category, limit));
+            } catch (Exception exception) {
+                handleRepositoryFailure("load the " + category + " leaderboard", exception);
+            }
+        });
+    }
+
+    // --- preferences and statistics -------------------------------------------------------------
 
     public boolean isScoreboardEnabled(UUID uniqueId) {
         if (strictDataDependency && !dataAvailable) {
@@ -123,10 +192,7 @@ public final class PlayerProfileService {
     }
 
     public boolean setScoreboardEnabled(UUID uniqueId, boolean enabled) {
-        if (strictDataDependency && !dataAvailable) {
-            return false;
-        }
-        PlayerProfile profile = profilesById.get(uniqueId);
+        PlayerProfile profile = editable(uniqueId);
         if (profile == null) {
             return false;
         }
@@ -136,10 +202,7 @@ public final class PlayerProfileService {
     }
 
     public Optional<Boolean> toggleScoreboard(UUID uniqueId) {
-        if (strictDataDependency && !dataAvailable) {
-            return Optional.empty();
-        }
-        PlayerProfile profile = profilesById.get(uniqueId);
+        PlayerProfile profile = editable(uniqueId);
         if (profile == null) {
             return Optional.empty();
         }
@@ -156,10 +219,7 @@ public final class PlayerProfileService {
     }
 
     public boolean setLanguage(UUID uniqueId, PlayerLanguage language) {
-        if (strictDataDependency && !dataAvailable) {
-            return false;
-        }
-        PlayerProfile profile = profilesById.get(uniqueId);
+        PlayerProfile profile = editable(uniqueId);
         if (profile == null) {
             return false;
         }
@@ -169,10 +229,7 @@ public final class PlayerProfileService {
     }
 
     public void setSelectedKit(UUID uniqueId, String kitId) {
-        if (strictDataDependency && !dataAvailable) {
-            return;
-        }
-        PlayerProfile profile = profilesById.get(uniqueId);
+        PlayerProfile profile = editable(uniqueId);
         if (profile == null) {
             return;
         }
@@ -185,10 +242,7 @@ public final class PlayerProfileService {
     }
 
     public void registerKill(UUID uniqueId) {
-        if (strictDataDependency && !dataAvailable) {
-            return;
-        }
-        PlayerProfile profile = profilesById.get(uniqueId);
+        PlayerProfile profile = editable(uniqueId);
         if (profile == null) {
             return;
         }
@@ -197,15 +251,23 @@ public final class PlayerProfileService {
     }
 
     public void registerDeath(UUID uniqueId) {
-        if (strictDataDependency && !dataAvailable) {
-            return;
-        }
-        PlayerProfile profile = profilesById.get(uniqueId);
+        PlayerProfile profile = editable(uniqueId);
         if (profile == null) {
             return;
         }
         profile.getStatistics().registerDeath();
         persistProfile(profile);
+    }
+
+    /** Applies a change to a loaded profile and saves it; does nothing while it loads or offline. */
+    public boolean update(UUID uniqueId, Consumer<PlayerProfile> change) {
+        PlayerProfile profile = editable(uniqueId);
+        if (profile == null) {
+            return false;
+        }
+        change.accept(profile);
+        persistProfile(profile);
+        return true;
     }
 
     public PlayerStatistics getStatisticsOrDefault(UUID uniqueId) {
@@ -215,29 +277,62 @@ public final class PlayerProfileService {
         ).getStatistics();
     }
 
+    /** A loaded profile that may be changed now, or null. */
+    private PlayerProfile editable(UUID uniqueId) {
+        if (strictDataDependency && !dataAvailable) {
+            return null;
+        }
+        if (loadingGeneration.containsKey(uniqueId)) {
+            return null;
+        }
+        return profilesById.get(uniqueId);
+    }
+
+    // --- persistence ----------------------------------------------------------------------------
+
+    /** Saves every loaded profile and waits for it: for shutdown, when nothing may be lost. */
     public void persistAllCachedProfiles() {
         if (strictDataDependency && !dataAvailable) {
             return;
         }
-        for (PlayerProfile profile : profilesById.values()) {
-            persistProfile(profile);
-        }
+        profilesById.forEach((id, profile) -> {
+            if (!loadingGeneration.containsKey(id)) {
+                persistProfile(profile);
+            }
+        });
         flushPendingSynchronously();
     }
 
     public boolean pingRepository() {
         try {
-            synchronized (repositoryLock) {
-                boolean reachable = repository.ping();
-                if (reachable) {
-                    setDataAvailable(true);
-                }
-                return reachable;
+            boolean reachable = repository.ping();
+            if (reachable) {
+                setDataAvailable(true);
             }
+            return reachable;
         } catch (Exception exception) {
             handleRepositoryFailure("ping player profile repository", exception);
             return false;
         }
+    }
+
+    /** Pings storage in the background; {@code onResult} runs on the main thread. One ping at a time. */
+    public void pingRepositoryAsync(Consumer<Boolean> onResult) {
+        if (!pinging.compareAndSet(false, true)) {
+            return;
+        }
+        io.execute(() -> {
+            boolean reachable;
+            try {
+                reachable = repository.ping();
+            } catch (Exception exception) {
+                errors.error("Failed to ping player profile repository", exception);
+                reachable = false;
+            }
+            boolean result = reachable;
+            pinging.set(false);
+            mainThread.execute(() -> onResult.accept(result));
+        });
     }
 
     public boolean isDataAvailable() {
@@ -252,20 +347,20 @@ public final class PlayerProfileService {
     }
 
     public void closeRepository() {
-        workerRunning.set(false);
-        persistenceWorker.interrupt();
-        flushPendingSynchronously();
+        io.shutdown();
         try {
-            persistenceWorker.join(1500L);
-        } catch (InterruptedException ignored) {
+            if (!io.awaitTermination(5, TimeUnit.SECONDS)) {
+                io.shutdownNow();
+            }
+        } catch (InterruptedException interrupted) {
+            io.shutdownNow();
             Thread.currentThread().interrupt();
         }
+        flushPendingSynchronously();
         try {
-            synchronized (repositoryLock) {
-                repository.close();
-            }
+            repository.close();
         } catch (Exception exception) {
-            plugin.getLogger().error("Failed to close player repository", exception);
+            errors.error("Failed to close player repository", exception);
         }
     }
 
@@ -273,58 +368,44 @@ public final class PlayerProfileService {
         if (strictDataDependency && !dataAvailable) {
             return;
         }
-        pendingPersistence.put(profile.getUniqueId(), profile);
         UUID uniqueId = profile.getUniqueId();
+        // A copy: the background thread must not read a profile the game is changing at that moment.
+        pendingPersistence.put(uniqueId, copy(profile));
         if (queuedPersistenceIds.add(uniqueId)) {
-            persistenceQueue.offer(uniqueId);
-        }
-    }
-
-    private void runPersistenceWorker() {
-        while (workerRunning.get() || !persistenceQueue.isEmpty()) {
             try {
-                UUID uniqueId = persistenceQueue.poll(1, TimeUnit.SECONDS);
-                if (uniqueId == null) {
-                    continue;
-                }
-                flushOne(uniqueId);
-            } catch (InterruptedException ignored) {
-                if (!workerRunning.get()) {
-                    break;
-                }
-                Thread.currentThread().interrupt();
-                break;
+                io.execute(() -> flushOne(uniqueId));
+            } catch (java.util.concurrent.RejectedExecutionException shuttingDown) {
+                queuedPersistenceIds.remove(uniqueId);
+                // Picked up by flushPendingSynchronously during shutdown.
             }
         }
     }
 
     private void flushPendingSynchronously() {
-        UUID uniqueId;
-        while ((uniqueId = persistenceQueue.poll()) != null) {
-            flushOne(uniqueId);
-        }
         for (UUID pendingId : new ArrayList<>(pendingPersistence.keySet())) {
             flushOne(pendingId);
         }
     }
 
-    private void flushOne(UUID uniqueId) {
+    private synchronized void flushOne(UUID uniqueId) {
         queuedPersistenceIds.remove(uniqueId);
         PlayerProfile profile = pendingPersistence.remove(uniqueId);
         if (profile == null) {
             return;
         }
         try {
-            synchronized (repositoryLock) {
-                repository.save(profile);
-            }
+            repository.save(profile);
         } catch (Exception exception) {
             handleRepositoryFailure("save profile for " + profile.getLastKnownName(), exception);
         }
     }
 
+    private static PlayerProfile copy(PlayerProfile profile) {
+        return COPIER.fromJson(COPIER.toJsonTree(profile), PlayerProfile.class);
+    }
+
     private void handleRepositoryFailure(String action, Exception exception) {
-        plugin.getLogger().error("Failed to " + action, exception);
+        errors.error("Failed to " + action, exception);
         if (!strictDataDependency) {
             return;
         }
@@ -335,13 +416,13 @@ public final class PlayerProfileService {
         }
 
         if (repositoryUnavailableCallback != null) {
-            try {
-                repositoryUnavailableCallback.run();
-            } catch (Exception callbackException) {
-                plugin.getLogger().error("Failed to trigger repository outage callback", callbackException);
-            }
+            mainThread.execute(() -> {
+                try {
+                    repositoryUnavailableCallback.run();
+                } catch (Exception callbackException) {
+                    errors.error("Failed to trigger repository outage callback", callbackException);
+                }
+            });
         }
     }
 }
-
-

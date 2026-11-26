@@ -54,6 +54,13 @@ public final class ArenaSessionService {
     }
 
     public boolean joinArena(Player player, String arenaId) {
+        if (!playerProfileService.isLoaded(player.getUniqueId())) {
+            // Stats would be lost: kills and deaths are only recorded on a loaded profile.
+            player.sendMessage(FfaMessageFormatter.info(t(player,
+                    "Your profile is still loading. Try again in a moment.",
+                    "Dein Profil wird noch geladen. Versuche es gleich noch einmal.")));
+            return false;
+        }
         Optional<ArenaDefinition> arenaOptional = arenaCatalogService.findArena(arenaId);
         if (arenaOptional.isEmpty()) {
             return false;

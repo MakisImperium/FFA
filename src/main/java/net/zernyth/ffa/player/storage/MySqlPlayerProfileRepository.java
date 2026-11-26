@@ -1,6 +1,9 @@
 package net.zernyth.ffa.player.storage;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import net.zernyth.ffa.config.DatabaseConfiguration;
+import net.zernyth.ffa.player.model.LeaderboardCategory;
 import net.zernyth.ffa.player.model.PlayerLanguage;
 import net.zernyth.ffa.player.model.PlayerPreferences;
 import net.zernyth.ffa.player.model.PlayerProfile;
@@ -18,18 +21,79 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * Player profiles in MySQL.
+ *
+ * <p>Connections come from a small HikariCP pool rather than one new connection per query: opening a
+ * MySQL connection costs a network round trip and authentication, which was most of the time of
+ * every save. All calls arrive from the plugin's background thread, so the pool stays small.
+ */
 public final class MySqlPlayerProfileRepository implements PlayerProfileRepository {
+
+    private static final String COLUMNS = "uuid, username, kills, deaths, current_killstreak, best_killstreak, " +
+            "scoreboard_enabled, language, selected_kit";
 
     private final DatabaseConfiguration databaseConfiguration;
     private final String databaseName;
     private final String tableName;
+    private final HikariDataSource dataSource;
 
     public MySqlPlayerProfileRepository(DatabaseConfiguration databaseConfiguration) throws Exception {
         this.databaseConfiguration = databaseConfiguration;
         this.databaseName = sanitizeDatabaseName(databaseConfiguration.getDatabase());
         this.tableName = sanitizeTableName(databaseConfiguration.getTable());
         Class.forName("com.mysql.cj.jdbc.Driver");
-        initializeSchema();
+        ensureDatabaseExists();
+        this.dataSource = createPool();
+        try {
+            initializeSchema();
+        } catch (Exception exception) {
+            dataSource.close();
+            throw exception;
+        }
+    }
+
+    private HikariDataSource createPool() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(databaseUrl());
+        config.setUsername(databaseConfiguration.getUsername());
+        config.setPassword(databaseConfiguration.getPassword());
+        config.setPoolName("ffa-mysql");
+        config.setMaximumPoolSize(3);
+        config.setMinimumIdle(1);
+        config.setConnectionTimeout(10_000);
+        config.setValidationTimeout(5_000);
+        // Recycle before MySQL's default wait_timeout (8 h) closes idle connections on its side.
+        config.setMaxLifetime(30 * 60_000L);
+        config.setKeepaliveTime(5 * 60_000L);
+        config.setInitializationFailTimeout(10_000);
+        return new HikariDataSource(config);
+    }
+
+    @Override
+    public List<PlayerProfile> findTop(LeaderboardCategory category, int limit) throws Exception {
+        String order = switch (category) {
+            case KILLS -> "kills DESC";
+            case BEST_STREAK -> "best_killstreak DESC";
+            case KD -> "(CASE WHEN deaths = 0 THEN kills ELSE kills / deaths END) DESC";
+        };
+        String sql = "SELECT " + COLUMNS + " FROM `" + tableName + "` ORDER BY " + order + ", username ASC LIMIT ?";
+        List<PlayerProfile> profiles = new ArrayList<>();
+        try (Connection connection = openConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, Math.max(1, limit));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    profiles.add(mapProfile(resultSet));
+                }
+            }
+        }
+        return profiles;
+    }
+
+    @Override
+    public void close() {
+        dataSource.close();
     }
 
     @Override
@@ -123,7 +187,6 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
     }
 
     private void initializeSchema() throws Exception {
-        ensureDatabaseExists();
         String sql = "CREATE TABLE IF NOT EXISTS `" + tableName + "` (" +
                 "uuid VARCHAR(36) PRIMARY KEY," +
                 "username VARCHAR(32) NOT NULL," +
@@ -166,7 +229,11 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
     }
 
     private Connection openConnection() throws SQLException {
-        String url = "jdbc:mysql://" + databaseConfiguration.getHost() + ":" + databaseConfiguration.getPort() + "/" +
+        return dataSource.getConnection();
+    }
+
+    private String databaseUrl() {
+        return "jdbc:mysql://" + databaseConfiguration.getHost() + ":" + databaseConfiguration.getPort() + "/" +
                 databaseName +
                 "?createDatabaseIfNotExist=true" +
                 "&useUnicode=true" +
@@ -174,7 +241,6 @@ public final class MySqlPlayerProfileRepository implements PlayerProfileReposito
                 "&useSSL=" + databaseConfiguration.isUseSsl() +
                 "&allowPublicKeyRetrieval=" + databaseConfiguration.isAllowPublicKeyRetrieval() +
                 "&serverTimezone=UTC";
-        return DriverManager.getConnection(url, databaseConfiguration.getUsername(), databaseConfiguration.getPassword());
     }
 
     private Connection openServerConnection() throws SQLException {

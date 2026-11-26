@@ -8,6 +8,10 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class LocalizationService {
 
@@ -17,6 +21,13 @@ public final class LocalizationService {
     private final Path englishPath;
     private final Path germanPath;
     private final Object translationLock = new Object();
+    /** New keys are written in the background, a moment after the last one: menus never wait for the disk. */
+    private final ScheduledExecutorService writer = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "ffa-lang-writer");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final AtomicBoolean writeScheduled = new AtomicBoolean(false);
 
     private Map<String, String> englishTranslations = Map.of();
     private Map<String, String> germanTranslations = Map.of();
@@ -64,12 +75,33 @@ public final class LocalizationService {
                 return;
             }
 
-            try {
-                writeBundle(englishPath, englishTranslations);
-                writeBundle(germanPath, germanTranslations);
-            } catch (IOException exception) {
-                plugin.getLogger().warning("Failed to persist language bundle updates: " + exception.getMessage());
+            if (writeScheduled.compareAndSet(false, true)) {
+                writer.schedule(this::writeBundles, 2, TimeUnit.SECONDS);
             }
+        }
+    }
+
+    private void writeBundles() {
+        writeScheduled.set(false);
+        Map<String, String> english;
+        Map<String, String> german;
+        synchronized (translationLock) {
+            english = new HashMap<>(englishTranslations);
+            german = new HashMap<>(germanTranslations);
+        }
+        try {
+            writeBundle(englishPath, english);
+            writeBundle(germanPath, german);
+        } catch (IOException exception) {
+            plugin.getLogger().warning("Failed to persist language bundle updates: " + exception.getMessage());
+        }
+    }
+
+    /** Writes pending keys now and stops the writer; on disable. */
+    public void shutdown() {
+        writer.shutdownNow();
+        if (writeScheduled.getAndSet(false)) {
+            writeBundles();
         }
     }
 

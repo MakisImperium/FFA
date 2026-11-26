@@ -25,6 +25,7 @@ import net.zernyth.ffa.listener.ArenaProtectionListener;
 import net.zernyth.ffa.listener.FormInteractionListener;
 import net.zernyth.ffa.listener.PlayerLifecycleListener;
 import net.zernyth.ffa.listener.ZonePlacementListener;
+import net.zernyth.ffa.player.service.LeaderboardService;
 import net.zernyth.ffa.player.service.PlayerProfileService;
 import net.zernyth.ffa.player.storage.JsonPlayerProfileRepository;
 import net.zernyth.ffa.player.storage.MySqlPlayerProfileRepository;
@@ -39,6 +40,7 @@ public final class FFABootstrap extends PluginBase {
 
     private static final int MYSQL_RECONNECT_INTERVAL_TICKS = 20 * 15;
     private static final int MYSQL_MAX_RECONNECT_ATTEMPTS = 3;
+    private static final int LEADERBOARD_REFRESH_TICKS = 20 * 60;
 
     private PluginConfiguration pluginConfiguration;
     private JsonFileService jsonFileService;
@@ -51,6 +53,8 @@ public final class FFABootstrap extends PluginBase {
     private final Object databaseStateLock = new Object();
 
     private PlayerProfileService playerProfileService;
+    private LeaderboardService leaderboardService;
+    private TaskHandler leaderboardTask;
     private ArenaCatalogService arenaCatalogService;
     private ArenaSessionService arenaSessionService;
     private SafeZonePlacementService safeZonePlacementService;
@@ -79,12 +83,18 @@ public final class FFABootstrap extends PluginBase {
     @Override
     public void onDisable() {
         stopReconnectTask();
+        if (leaderboardTask != null) {
+            leaderboardTask.cancel();
+        }
         if (scoreboardService != null) {
             scoreboardService.stop();
         }
         if (playerProfileService != null) {
             playerProfileService.persistAllCachedProfiles();
             playerProfileService.closeRepository();
+        }
+        if (localizationService != null) {
+            localizationService.shutdown();
         }
     }
 
@@ -117,12 +127,16 @@ public final class FFABootstrap extends PluginBase {
             throw exception;
         }
         this.playerProfileService = new PlayerProfileService(
-                this,
                 playerProfileRepository,
+                (message, cause) -> getLogger().error(message, cause),
+                task -> getServer().getScheduler().scheduleTask(this, task),
                 pluginConfiguration.getScoreboard().isEnabledByDefault(),
                 strictMySqlMode,
                 this::handleDatabaseOutageTriggered
         );
+        this.leaderboardService = new LeaderboardService(playerProfileService);
+        this.leaderboardService.refresh();
+        this.leaderboardTask = getServer().getScheduler().scheduleRepeatingTask(this, leaderboardService::refresh, LEADERBOARD_REFRESH_TICKS);
 
         KitRepository kitRepository = new JsonKitRepository(jsonFileService, dataPath.resolve("kits"));
         this.kitRegistry = new KitRegistry(this, kitRepository);
@@ -149,6 +163,7 @@ public final class FFABootstrap extends PluginBase {
                 kitSelectionService,
                 kitApplicationService,
                 playerProfileService,
+                leaderboardService,
                 scoreboardService,
                 localizationService
         );
@@ -165,8 +180,11 @@ public final class FFABootstrap extends PluginBase {
         getServer().getCommandMap().register("ffaadmin", new FfaAdminCommand(formController));
 
         for (Player player : getServer().getOnlinePlayers().values()) {
-            playerProfileService.loadProfile(player);
-            scoreboardService.handleJoin(player);
+            playerProfileService.loadProfile(player, profile -> {
+                if (player.isOnline()) {
+                    scoreboardService.handleJoin(player);
+                }
+            });
         }
     }
 
@@ -261,7 +279,14 @@ public final class FFABootstrap extends PluginBase {
             return;
         }
 
-        boolean reachable = playerProfileService.pingRepository();
+        // The ping waits for the network; it runs in the background and reports back here.
+        playerProfileService.pingRepositoryAsync(this::handleReconnectResult);
+    }
+
+    private void handleReconnectResult(boolean reachable) {
+        if (!isEnabled() || playerProfileService == null) {
+            return;
+        }
         if (reachable) {
             synchronized (databaseStateLock) {
                 databaseOutageMode = false;
