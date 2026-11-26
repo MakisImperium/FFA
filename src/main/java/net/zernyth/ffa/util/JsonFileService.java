@@ -7,7 +7,9 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -41,8 +43,20 @@ public final class JsonFileService {
         if (parent != null) {
             Files.createDirectories(parent);
         }
-        try (Writer writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
-            gson.toJson(value, writer);
+        // Written next to the target and moved over it: a crash mid-write leaves the old file intact
+        // instead of half a profile.
+        Path temp = Files.createTempFile(parent != null ? parent : Path.of("."), path.getFileName().toString(), ".tmp");
+        try {
+            try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
+                gson.toJson(value, writer);
+            }
+            try {
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
         }
     }
 }

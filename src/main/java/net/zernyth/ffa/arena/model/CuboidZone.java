@@ -46,14 +46,14 @@ public final class CuboidZone {
         if (location == null || location.getLevel() == null) {
             return false;
         }
-        if (worldName == null || !worldName.equalsIgnoreCase(location.getLevel().getName())) {
+        return contains(location.getLevel().getName(), location.getX(), location.getY(), location.getZ());
+    }
+
+    /** Whether a point in a world lies inside the zone, edges included. */
+    public boolean contains(String world, double x, double y, double z) {
+        if (worldName == null || world == null || !worldName.equalsIgnoreCase(world)) {
             return false;
         }
-
-        double x = location.getX();
-        double y = location.getY();
-        double z = location.getZ();
-
         return x >= minX && x <= maxX
                 && y >= minY && y <= maxY
                 && z >= minZ && z <= maxZ;

@@ -41,10 +41,16 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // MySQL in a container for the repository test; skipped where Docker is not running.
+    testImplementation("org.testcontainers:mysql:1.21.3")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.3")
 }
 
 tasks.test {
     useJUnitPlatform()
+    // Docker Desktop 29 rejects the API version Testcontainers 1.21 asks for by default.
+    environment("DOCKER_API_VERSION", "1.44")
+    systemProperty("api.version", "1.44")
 }
 
 java {

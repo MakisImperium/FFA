@@ -42,3 +42,6 @@ build/
 
 # IDE state belongs to each developer
 .idea/
+
+# written by the server library during tests
+logs/
