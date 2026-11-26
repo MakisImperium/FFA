@@ -81,6 +81,14 @@ public final class FfaFormController implements FormIds {
     final SettingsMenus settingsMenus;
     final ArenaAdminMenus arenaAdminMenus;
     final KitAdminMenus kitAdminMenus;
+    final ShopMenus shopMenus;
+
+    /** Set once the economy is wired up; the shop reads cosmetics and prices from it. */
+    net.zernyth.ffa.economy.EconomyService economyService;
+
+    public void setEconomyService(net.zernyth.ffa.economy.EconomyService economyService) {
+        this.economyService = economyService;
+    }
 
     public FfaFormController(
             ArenaCatalogService arenaCatalogService,
@@ -112,6 +120,7 @@ public final class FfaFormController implements FormIds {
         this.settingsMenus = new SettingsMenus(this);
         this.arenaAdminMenus = new ArenaAdminMenus(this);
         this.kitAdminMenus = new KitAdminMenus(this);
+        this.shopMenus = new ShopMenus(this);
     }
 
     public void openPlayerMain(Player player) {
@@ -145,6 +154,9 @@ public final class FfaFormController implements FormIds {
                     FORM_PLAYER_ACHIEVEMENTS, FORM_PLAYER_SEASON -> statsMenus.openPlayerStats(player);
             case FORM_PLAYER_STATS_UNAVAILABLE -> playerMenus.openPlayerMain(player);
             case FORM_PLAYER_SETTINGS -> settingsMenus.handlePlayerSettings(player, response);
+            case FORM_PLAYER_SHOP -> shopMenus.handleShop(player, response);
+            case FORM_PLAYER_SHOP_CATEGORY -> shopMenus.handleCategory(player, response);
+            case FORM_PLAYER_SHOP_CONFIRM -> shopMenus.handleConfirm(player, response);
             case FORM_PLAYER_ARENA_JOINED -> playerMenus.handleArenaJoinedForm(player, response);
             case FORM_ADMIN_MAIN -> arenaAdminMenus.handleAdminMain(player, response);
             case FORM_ADMIN_ARENA_MENU -> arenaAdminMenus.handleAdminArenaMenu(player, response);
@@ -188,7 +200,9 @@ public final class FfaFormController implements FormIds {
             case FORM_PLAYER_STATS_OVERVIEW, FORM_PLAYER_STATS_GLOBAL, FORM_PLAYER_STATS_ARENA, FORM_PLAYER_PROGRESS, FORM_PLAYER_TASKS,
                     FORM_PLAYER_ACHIEVEMENTS, FORM_PLAYER_SEASON -> statsMenus.openPlayerStats(player);
             case FORM_PLAYER_STATS_UNAVAILABLE -> playerMenus.openPlayerMain(player);
-            case FORM_PLAYER_ARENA_MENU, FORM_PLAYER_KIT_MENU, FORM_PLAYER_STATS, FORM_PLAYER_SETTINGS -> playerMenus.openPlayerMain(player);
+            case FORM_PLAYER_SHOP_CATEGORY -> shopMenus.openShop(player);
+            case FORM_PLAYER_SHOP_CONFIRM -> shopMenus.reopenCategory(player);
+            case FORM_PLAYER_ARENA_MENU, FORM_PLAYER_KIT_MENU, FORM_PLAYER_STATS, FORM_PLAYER_SETTINGS, FORM_PLAYER_SHOP -> playerMenus.openPlayerMain(player);
             case FORM_ADMIN_ARENA_CREATE, FORM_ADMIN_ARENA_DELETE, FORM_ADMIN_ARENA_ADD_SPAWN,
                     FORM_ADMIN_ARENA_STATUS, FORM_ADMIN_ZONE_MENU, FORM_ADMIN_ARENA_LIST -> arenaAdminMenus.openAdminArenaMenu(player);
             case FORM_ADMIN_ARENA_DELETE_CONFIRM -> arenaAdminMenus.openAdminArenaDelete(player);
@@ -217,7 +231,7 @@ public final class FfaFormController implements FormIds {
     }
 
     public void clearPlayerState(UUID uniqueId) {
-        for (FormSupport module : List.of(playerMenus, playerKitMenus, statsMenus, settingsMenus, arenaAdminMenus, kitAdminMenus)) {
+        for (FormSupport module : List.of(playerMenus, playerKitMenus, statsMenus, settingsMenus, arenaAdminMenus, kitAdminMenus, shopMenus)) {
             module.clear(uniqueId);
         }
     }

@@ -8,6 +8,7 @@ public final class PluginConfiguration {
     private FairnessConfiguration fairness = new FairnessConfiguration();
     private net.zernyth.ffa.streak.StreakConfiguration streaks = new net.zernyth.ffa.streak.StreakConfiguration();
     private net.zernyth.ffa.progression.ProgressionConfiguration progression = new net.zernyth.ffa.progression.ProgressionConfiguration();
+    private net.zernyth.ffa.economy.EconomyConfiguration economy = new net.zernyth.ffa.economy.EconomyConfiguration();
 
     public StorageBackend resolveStorageBackend() {
         return StorageBackend.fromText(storageBackend);
@@ -48,12 +49,20 @@ public final class PluginConfiguration {
         return progression;
     }
 
+    public net.zernyth.ffa.economy.EconomyConfiguration getEconomy() {
+        if (economy == null) {
+            economy = new net.zernyth.ffa.economy.EconomyConfiguration();
+        }
+        return economy;
+    }
+
     public void normalize() {
         getDatabase();
         getScoreboard();
         getFairness();
         getStreaks();
         getProgression();
+        getEconomy();
     }
 }
 

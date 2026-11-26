@@ -84,6 +84,15 @@ final class PlayerMenus extends FormSupport {
                 "Zeige deine Kampfstatistiken")));
         actions.add(PlayerMainAction.STATS);
 
+        if (root.economyService != null) {
+            form.addElement(new ElementButton(button(player, TextFormat.LIGHT_PURPLE,
+                    "Shop",
+                    "Kill effects and messages for coins",
+                    "Shop",
+                    "Kill-Effekte und Nachrichten fuer Muenzen")));
+            actions.add(PlayerMainAction.SHOP);
+        }
+
         form.addElement(new ElementButton(button(player, TextFormat.YELLOW,
                 "Settings",
                 "Language and scoreboard preferences",
@@ -148,6 +157,7 @@ final class PlayerMenus extends FormSupport {
             case KITS -> root.playerKitMenus.openPlayerKitMenu(player);
             case STATS -> root.statsMenus.openPlayerStats(player);
             case SETTINGS -> root.settingsMenus.openPlayerSettings(player);
+            case SHOP -> root.shopMenus.openShop(player);
             case CLOSE -> {
             }
         }
@@ -365,6 +375,7 @@ final class PlayerMenus extends FormSupport {
         ARENA,
         KITS,
         STATS,
+        SHOP,
         SETTINGS,
         CLOSE
     }

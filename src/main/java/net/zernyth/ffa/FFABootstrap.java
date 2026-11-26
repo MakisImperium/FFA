@@ -244,6 +244,18 @@ public final class FFABootstrap extends PluginBase {
         getServer().getPluginManager().registerEvents(new ZonePlacementListener(safeZonePlacementService, formController), this);
 
         formController.setProgressionService(progressionService, () -> pluginConfiguration.getProgression().levelCurve());
+
+        // Economy: coins for kills, the cosmetics shop, kill effects and messages.
+        net.zernyth.ffa.economy.EconomyService economyService = new net.zernyth.ffa.economy.EconomyService(playerProfileService,
+                arenaSessionService, () -> pluginConfiguration.getEconomy(), () -> pluginConfiguration.getStreaks());
+        killService.addListener(economyService);
+        arenaSessionService.addJoinListener(economyService::onArenaJoin);
+        formController.setEconomyService(economyService);
+        scoreboardService.addLineProvider((viewer, language) -> playerProfileService.getProfile(viewer.getUniqueId())
+                .map(profile -> java.util.List.of(TextFormat.GRAY
+                        + (language == net.zernyth.ffa.player.model.PlayerLanguage.GERMAN ? "Muenzen: " : "Coins: ")
+                        + TextFormat.YELLOW + profile.getProgress().getCoins()))
+                .orElse(java.util.List.of()));
         getServer().getCommandMap().register("ffa", new FfaCommand(formController));
         getServer().getCommandMap().register("ffaadmin", new FfaAdminCommand(formController));
 

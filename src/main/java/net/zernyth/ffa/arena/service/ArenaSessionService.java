@@ -38,6 +38,12 @@ public final class ArenaSessionService {
     private final ConcurrentHashMap<UUID, Long> respawnProtectionUntil = new ConcurrentHashMap<>();
 
     private static final long RESPAWN_PROTECTION_MILLIS = 5000L;
+    private final java.util.List<java.util.function.Consumer<Player>> joinListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Called on the main thread after a player has entered an arena and got their kit. */
+    public void addJoinListener(java.util.function.Consumer<Player> listener) {
+        joinListeners.add(listener);
+    }
 
     public ArenaSessionService(
             PluginBase plugin,
@@ -97,6 +103,13 @@ public final class ArenaSessionService {
                 player.sendMessage(FfaMessageFormatter.warning(t(player,
                         "Selected kit could not be loaded.",
                         "Ausgewaehltes Kit konnte nicht geladen werden.")));
+            }
+        }
+        for (java.util.function.Consumer<Player> listener : joinListeners) {
+            try {
+                listener.accept(player);
+            } catch (RuntimeException exception) {
+                plugin.getLogger().warning("An arena join listener failed: " + exception.getMessage());
             }
         }
         return true;
