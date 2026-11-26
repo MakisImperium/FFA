@@ -10,6 +10,9 @@ import net.zernyth.ffa.arena.persistence.JsonArenaRepository;
 import net.zernyth.ffa.arena.service.ArenaCatalogService;
 import net.zernyth.ffa.arena.service.ArenaSessionService;
 import net.zernyth.ffa.arena.service.SafeZonePlacementService;
+import net.zernyth.ffa.combat.CombatTagService;
+import net.zernyth.ffa.combat.KillFarmGuard;
+import net.zernyth.ffa.combat.KillService;
 import net.zernyth.ffa.command.FfaAdminCommand;
 import net.zernyth.ffa.command.FfaCommand;
 import net.zernyth.ffa.config.ConfigurationService;
@@ -22,6 +25,7 @@ import net.zernyth.ffa.kit.service.KitRegistry;
 import net.zernyth.ffa.kit.service.KitSelectionService;
 import net.zernyth.ffa.i18n.LocalizationService;
 import net.zernyth.ffa.listener.ArenaProtectionListener;
+import net.zernyth.ffa.listener.CombatListener;
 import net.zernyth.ffa.listener.FormInteractionListener;
 import net.zernyth.ffa.listener.PlayerLifecycleListener;
 import net.zernyth.ffa.listener.ZonePlacementListener;
@@ -63,6 +67,8 @@ public final class FFABootstrap extends PluginBase {
     private KitApplicationService kitApplicationService;
     private FfaScoreboardService scoreboardService;
     private FfaFormController formController;
+    private KillService killService;
+    private KillFarmGuard killFarmGuard;
 
     @Override
     public void onEnable() {
@@ -155,6 +161,20 @@ public final class FFABootstrap extends PluginBase {
 
         this.scoreboardService = new FfaScoreboardService(this, playerProfileService, arenaSessionService);
         this.scoreboardService.start(pluginConfiguration.getScoreboard().getUpdateIntervalTicks());
+
+        var fairness = pluginConfiguration.getFairness();
+        CombatTagService combatTags = new CombatTagService(fairness.getCombatTagSeconds() * 1000L, System::currentTimeMillis);
+        this.killFarmGuard = new KillFarmGuard(fairness.getFarmMaxKills(), fairness.getFarmWindowMinutes() * 60_000L, System::currentTimeMillis);
+        this.killService = new KillService(arenaSessionService, playerProfileService, scoreboardService, combatTags, killFarmGuard);
+        getServer().getScheduler().scheduleRepeatingTask(this, killFarmGuard::prune, 20 * 60 * 5);
+        scoreboardService.addLineProvider((viewer, language) -> {
+            int seconds = combatTags.remainingSeconds(viewer.getUniqueId());
+            if (seconds <= 0) {
+                return java.util.List.of();
+            }
+            String label = language == net.zernyth.ffa.player.model.PlayerLanguage.GERMAN ? "Im Kampf " : "In combat ";
+            return java.util.List.of(TextFormat.RED + label + TextFormat.WHITE + seconds + "s");
+        });
         this.formController = new FfaFormController(
                 arenaCatalogService,
                 arenaSessionService,
@@ -165,14 +185,16 @@ public final class FFABootstrap extends PluginBase {
                 playerProfileService,
                 leaderboardService,
                 scoreboardService,
-                localizationService
+                localizationService,
+                killService
         );
 
         getServer().getPluginManager().registerEvents(
-                new PlayerLifecycleListener(this, playerProfileService, arenaSessionService, scoreboardService, formController),
+                new PlayerLifecycleListener(this, playerProfileService, arenaSessionService, scoreboardService, formController, killService),
                 this
         );
         getServer().getPluginManager().registerEvents(new ArenaProtectionListener(arenaSessionService), this);
+        getServer().getPluginManager().registerEvents(new CombatListener(arenaSessionService, killService.combat()), this);
         getServer().getPluginManager().registerEvents(new FormInteractionListener(formController), this);
         getServer().getPluginManager().registerEvents(new ZonePlacementListener(safeZonePlacementService, formController), this);
 

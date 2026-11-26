@@ -5,6 +5,7 @@ public final class PluginConfiguration {
     private String storageBackend = "MYSQL";
     private DatabaseConfiguration database = new DatabaseConfiguration();
     private ScoreboardConfiguration scoreboard = new ScoreboardConfiguration();
+    private FairnessConfiguration fairness = new FairnessConfiguration();
 
     public StorageBackend resolveStorageBackend() {
         return StorageBackend.fromText(storageBackend);
@@ -24,9 +25,17 @@ public final class PluginConfiguration {
         return scoreboard;
     }
 
+    public FairnessConfiguration getFairness() {
+        if (fairness == null) {
+            fairness = new FairnessConfiguration();
+        }
+        return fairness;
+    }
+
     public void normalize() {
         getDatabase();
         getScoreboard();
+        getFairness();
     }
 }
 

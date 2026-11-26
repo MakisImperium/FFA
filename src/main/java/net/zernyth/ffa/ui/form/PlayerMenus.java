@@ -159,7 +159,7 @@ final class PlayerMenus extends FormSupport {
         }
         switch (simple.buttonId()) {
             case 0 -> {
-                arenaSessionService.leaveArena(player, true);
+                leaveArenaByChoice(player);
                 scoreboardService.refreshPlayer(player);
                 sendInfo(player, t(player, "Arena session ended.", "Arena-Session beendet."));
             }
@@ -208,7 +208,7 @@ final class PlayerMenus extends FormSupport {
                 if (!arenaSessionService.isPlayerInArena(player.getUniqueId())) {
                     sendWarning(player, t(player, "You are not inside an arena.", "Du bist aktuell in keiner Arena."));
                 } else {
-                    arenaSessionService.leaveArena(player, true);
+                    leaveArenaByChoice(player);
                     scoreboardService.refreshPlayer(player);
                     sendInfo(player, t(player, "Arena session ended.", "Arena-Session beendet."));
                 }

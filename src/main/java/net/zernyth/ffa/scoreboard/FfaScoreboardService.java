@@ -26,6 +26,14 @@ public final class FfaScoreboardService {
     private final ConcurrentHashMap<UUID, Scoreboard> scoreboardsByPlayer = new ConcurrentHashMap<>();
 
     private TaskHandler updateTask;
+    /** Extra lines other features add below the stats (combat timer, level, events, ...). */
+    private final java.util.List<java.util.function.BiFunction<Player, PlayerLanguage, java.util.List<String>>> lineProviders =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Adds lines to every arena scoreboard; the function gets the viewer and their language. */
+    public void addLineProvider(java.util.function.BiFunction<Player, PlayerLanguage, java.util.List<String>> provider) {
+        lineProviders.add(provider);
+    }
 
     public FfaScoreboardService(
             PluginBase plugin,
@@ -108,6 +116,9 @@ public final class FfaScoreboardService {
             }
         }
 
+        for (var provider : lineProviders) {
+            lines.addAll(provider.apply(player, language));
+        }
         scoreboard.setLines(lines);
     }
 

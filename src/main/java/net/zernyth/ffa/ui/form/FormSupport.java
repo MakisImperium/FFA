@@ -19,6 +19,7 @@ import net.zernyth.ffa.arena.model.ArenaStatus;
 import net.zernyth.ffa.arena.service.ArenaCatalogService;
 import net.zernyth.ffa.arena.service.ArenaSessionService;
 import net.zernyth.ffa.arena.service.SafeZonePlacementService;
+import net.zernyth.ffa.combat.KillService;
 import net.zernyth.ffa.i18n.LocalizationService;
 import net.zernyth.ffa.kit.model.KitDefinition;
 import net.zernyth.ffa.kit.model.KitItem;
@@ -59,6 +60,7 @@ abstract class FormSupport implements FormIds {
     protected final LeaderboardService leaderboardService;
     protected final FfaScoreboardService scoreboardService;
     protected final LocalizationService localizationService;
+    protected final KillService killService;
 
     protected FormSupport(FfaFormController root) {
         this.root = root;
@@ -72,6 +74,16 @@ abstract class FormSupport implements FormIds {
         this.leaderboardService = root.leaderboardService;
         this.scoreboardService = root.scoreboardService;
         this.localizationService = root.localizationService;
+        this.killService = root.killService;
+    }
+
+    /**
+     * The player leaves the arena from a menu. In the middle of a fight that counts as a death and
+     * the attacker gets the kill, exactly like logging out.
+     */
+    protected void leaveArenaByChoice(Player player) {
+        killService.forfeit(player, KillService.Cause.LEAVE);
+        arenaSessionService.leaveArena(player, true);
     }
 
     /** Forgets what this module remembered about a player between two forms. */

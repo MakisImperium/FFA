@@ -14,6 +14,7 @@ import org.powernukkitx.event.player.PlayerRespawnEvent;
 import org.powernukkitx.item.Item;
 import org.powernukkitx.plugin.PluginBase;
 import net.zernyth.ffa.arena.service.ArenaSessionService;
+import net.zernyth.ffa.combat.KillService;
 import net.zernyth.ffa.messaging.FfaMessageFormatter;
 import net.zernyth.ffa.player.model.PlayerLanguage;
 import net.zernyth.ffa.player.service.PlayerProfileService;
@@ -27,14 +28,17 @@ public final class PlayerLifecycleListener implements Listener {
     private final ArenaSessionService arenaSessionService;
     private final FfaScoreboardService scoreboardService;
     private final FfaFormController formController;
+    private final KillService killService;
 
     public PlayerLifecycleListener(
             PluginBase plugin,
             PlayerProfileService playerProfileService,
             ArenaSessionService arenaSessionService,
             FfaScoreboardService scoreboardService,
-            FfaFormController formController
+            FfaFormController formController,
+            KillService killService
     ) {
+        this.killService = killService;
         this.plugin = plugin;
         this.playerProfileService = playerProfileService;
         this.arenaSessionService = arenaSessionService;
@@ -56,6 +60,9 @@ public final class PlayerLifecycleListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        // Logging out to escape a lost fight counts as a death; the attacker gets the kill.
+        killService.forfeit(player, KillService.Cause.LOGOUT);
+        killService.combat().clear(player.getUniqueId());
         arenaSessionService.removePlayerSession(player.getUniqueId());
         formController.clearPlayerState(player.getUniqueId());
         scoreboardService.handleQuit(player);
@@ -69,22 +76,12 @@ public final class PlayerLifecycleListener implements Listener {
             return;
         }
 
-        playerProfileService.registerDeath(victim.getUniqueId());
         event.setKeepInventory(true);
         event.setKeepExperience(true);
         event.setDrops(new Item[0]);
 
-        Player killer = resolveKiller(victim.getLastDamageCause());
-        if (killer != null && !killer.getUniqueId().equals(victim.getUniqueId())
-                && arenaSessionService.areInSameArena(killer.getUniqueId(), victim.getUniqueId())) {
-            playerProfileService.registerKill(killer.getUniqueId());
-            arenaSessionService.replenishPlayerAfterKill(killer);
-            int streak = playerProfileService.getStatisticsOrDefault(killer.getUniqueId()).getCurrentKillstreak();
-            killer.sendMessage(FfaMessageFormatter.success(t(killer,
-                    "Elimination confirmed. Loadout refilled. Streak: " + streak + ".",
-                    "Eliminierung bestaetigt. Loadout aufgefuellt. Streak: " + streak + ".")));
-            scoreboardService.refreshPlayer(killer);
-        }
+        // Stats, rewards and messages for the killer: all in the kill service.
+        killService.onDeath(victim, resolveKiller(victim.getLastDamageCause()));
 
         victim.sendMessage(FfaMessageFormatter.error(t(victim,
                 "You were eliminated. Redeploying...",

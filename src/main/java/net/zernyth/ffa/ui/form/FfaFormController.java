@@ -19,6 +19,7 @@ import net.zernyth.ffa.arena.model.ArenaStatus;
 import net.zernyth.ffa.arena.service.ArenaCatalogService;
 import net.zernyth.ffa.arena.service.ArenaSessionService;
 import net.zernyth.ffa.arena.service.SafeZonePlacementService;
+import net.zernyth.ffa.combat.KillService;
 import net.zernyth.ffa.i18n.LocalizationService;
 import net.zernyth.ffa.kit.model.KitDefinition;
 import net.zernyth.ffa.kit.model.KitItem;
@@ -62,6 +63,7 @@ public final class FfaFormController implements FormIds {
     final LeaderboardService leaderboardService;
     final FfaScoreboardService scoreboardService;
     final LocalizationService localizationService;
+    final KillService killService;
 
     final PlayerMenus playerMenus;
     final PlayerKitMenus playerKitMenus;
@@ -80,8 +82,10 @@ public final class FfaFormController implements FormIds {
             PlayerProfileService playerProfileService,
             LeaderboardService leaderboardService,
             FfaScoreboardService scoreboardService,
-            LocalizationService localizationService
+            LocalizationService localizationService,
+            KillService killService
     ) {
+        this.killService = killService;
         this.leaderboardService = leaderboardService;
         this.arenaCatalogService = arenaCatalogService;
         this.arenaSessionService = arenaSessionService;
