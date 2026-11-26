@@ -71,6 +71,8 @@ public final class FFABootstrap extends PluginBase {
     private KillFarmGuard killFarmGuard;
     private net.zernyth.ffa.progression.ProgressionService progressionService;
     private net.zernyth.ffa.mode.SpectatorService spectatorService;
+    private net.zernyth.ffa.visibility.HologramService hologramService;
+    private net.zernyth.ffa.visibility.DiscordService discordService;
     private net.zernyth.ffa.progression.SeasonService seasonService;
     /** Small file writes (seasons) away from the main thread. */
     private final java.util.concurrent.ExecutorService backgroundWriter = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
@@ -99,6 +101,12 @@ public final class FFABootstrap extends PluginBase {
     public void onDisable() {
         if (spectatorService != null) {
             spectatorService.restoreAll();
+        }
+        if (hologramService != null) {
+            hologramService.hideAll();
+        }
+        if (discordService != null) {
+            discordService.shutdown();
         }
         stopReconnectTask();
         if (leaderboardTask != null) {
@@ -264,6 +272,7 @@ public final class FFABootstrap extends PluginBase {
         FfaAdminCommand ffaAdminCommand = new FfaAdminCommand(formController);
         registerModes(ffaCommand, ffaAdminCommand);
         registerAdminTools(ffaAdminCommand, economyService, configurationService, dataPath);
+        registerVisibility(ffaAdminCommand, dataPath);
         getServer().getCommandMap().register("ffa", ffaCommand);
         getServer().getCommandMap().register("ffaadmin", ffaAdminCommand);
 
@@ -274,6 +283,36 @@ public final class FFABootstrap extends PluginBase {
                 }
             });
         }
+    }
+
+    /** The floating leaderboard and the Discord webhook. */
+    private void registerVisibility(FfaAdminCommand admin, Path dataPath) {
+        this.hologramService = new net.zernyth.ffa.visibility.HologramService(() -> pluginConfiguration.getHologram(),
+                leaderboardService, playerProfileService, progressionService::level, jsonFileService,
+                dataPath.resolve("hologram.json"), backgroundWriter, System::currentTimeMillis);
+        hologramService.load();
+        getServer().getPluginManager().registerEvents(hologramService, this);
+        getServer().getScheduler().scheduleRepeatingTask(this, hologramService::tick, 20);
+        admin.subcommands().add("hologram", "hologram set | remove | info", (player, args) -> {
+            String action = args.length == 0 ? "info" : args[0].toLowerCase(java.util.Locale.ROOT);
+            switch (action) {
+                case "set" -> {
+                    hologramService.setPlace(player);
+                    player.sendMessage(TextFormat.GREEN + "Leaderboard placed here.");
+                }
+                case "remove" -> player.sendMessage(hologramService.removePlace()
+                        ? TextFormat.GREEN + "Leaderboard removed." : TextFormat.GRAY + "There is no leaderboard.");
+                default -> player.sendMessage(TextFormat.GRAY + hologramService.describe()
+                        .map(place -> "Leaderboard at " + place + ". /ffaadmin hologram set | remove")
+                        .orElse("No leaderboard placed. Stand where it should float: /ffaadmin hologram set"));
+            }
+        });
+
+        this.discordService = new net.zernyth.ffa.visibility.DiscordService(() -> pluginConfiguration.getDiscord(),
+                playerProfileService, (message, cause) -> getLogger().warning(message));
+        killService.addListener(discordService);
+        seasonService.addArchiveListener(discordService::onSeasonArchived);
+        progressionService.addAchievementListener(discordService::onAchievement);
     }
 
     /** Reload, arena tools, kick, announcements, boost events, migration and kit levels. */

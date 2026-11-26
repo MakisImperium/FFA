@@ -70,6 +70,12 @@ public final class SeasonService {
     private final Executor io;
     private final Ranking ranking;
     private final Consumer<String> onNewSeason;
+    private final List<java.util.function.BiConsumer<String, List<Entry>>> archiveListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Called with the season id and its top players once a finished season is archived. */
+    public void addArchiveListener(java.util.function.BiConsumer<String, List<Entry>> listener) {
+        archiveListeners.add(listener);
+    }
 
     private volatile State state;
     private volatile List<Archived> archive = List.of();
@@ -180,6 +186,8 @@ public final class SeasonService {
                 file.seasons = nextArchive;
             }
             io.execute(() -> write(archivePath, file));
+            List<Entry> top = List.copyOf(finished.top);
+            archiveListeners.forEach(listener -> listener.accept(oldId, top));
         });
     }
 

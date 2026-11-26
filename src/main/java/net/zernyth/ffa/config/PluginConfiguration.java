@@ -10,6 +10,8 @@ public final class PluginConfiguration {
     private net.zernyth.ffa.progression.ProgressionConfiguration progression = new net.zernyth.ffa.progression.ProgressionConfiguration();
     private net.zernyth.ffa.economy.EconomyConfiguration economy = new net.zernyth.ffa.economy.EconomyConfiguration();
     private net.zernyth.ffa.event.EventConfiguration events = new net.zernyth.ffa.event.EventConfiguration();
+    private net.zernyth.ffa.visibility.VisibilityConfiguration.Hologram hologram = new net.zernyth.ffa.visibility.VisibilityConfiguration.Hologram();
+    private net.zernyth.ffa.visibility.VisibilityConfiguration.Discord discord = new net.zernyth.ffa.visibility.VisibilityConfiguration.Discord();
 
     public StorageBackend resolveStorageBackend() {
         return StorageBackend.fromText(storageBackend);
@@ -64,6 +66,20 @@ public final class PluginConfiguration {
         return events;
     }
 
+    public net.zernyth.ffa.visibility.VisibilityConfiguration.Hologram getHologram() {
+        if (hologram == null) {
+            hologram = new net.zernyth.ffa.visibility.VisibilityConfiguration.Hologram();
+        }
+        return hologram;
+    }
+
+    public net.zernyth.ffa.visibility.VisibilityConfiguration.Discord getDiscord() {
+        if (discord == null) {
+            discord = new net.zernyth.ffa.visibility.VisibilityConfiguration.Discord();
+        }
+        return discord;
+    }
+
     public void normalize() {
         getDatabase();
         getScoreboard();
@@ -72,6 +88,8 @@ public final class PluginConfiguration {
         getProgression();
         getEconomy();
         getEvents();
+        getHologram();
+        getDiscord();
     }
 }
 

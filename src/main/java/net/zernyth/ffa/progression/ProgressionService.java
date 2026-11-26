@@ -37,6 +37,12 @@ public final class ProgressionService implements KillService.KillListener, Liste
     /** Event multiplier for XP (Double XP hour); 1 normally. */
     private DoubleSupplier xpMultiplier = () -> 1.0;
     private final List<java.util.function.BiConsumer<Player, Long>> coinListeners = new ArrayList<>();
+    private final List<java.util.function.BiConsumer<Player, AchievementDefinition>> achievementListeners = new ArrayList<>();
+
+    /** Called on the main thread when a player unlocks an achievement. */
+    public void addAchievementListener(java.util.function.BiConsumer<Player, AchievementDefinition> listener) {
+        achievementListeners.add(listener);
+    }
 
     public ProgressionService(PlayerProfileService profiles, KitSelectionService kits, Supplier<ProgressionConfiguration> config,
                               Supplier<StreakConfiguration> streaks, LongSupplier clock) {
@@ -199,6 +205,7 @@ public final class ProgressionService implements KillService.KillListener, Liste
                 continue;
             }
             profile.getProgress().getAchievements().put(achievement.getId(), clock.getAsLong());
+            achievementListeners.forEach(listener -> listener.accept(player, achievement));
             profile.getProgress().addCoins(achievement.getCoins());
             coins[0] += achievement.getCoins();
             messages.add(TextFormat.LIGHT_PURPLE + "" + TextFormat.BOLD + t(player, "ACHIEVEMENT: ", "ERFOLG: ") + TextFormat.RESET
