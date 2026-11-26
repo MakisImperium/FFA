@@ -82,6 +82,15 @@ public final class FfaFormController implements FormIds {
     final ArenaAdminMenus arenaAdminMenus;
     final KitAdminMenus kitAdminMenus;
     final ShopMenus shopMenus;
+    final DuelMenus duelMenus;
+
+    /** Set once duels are wired up; the in-arena menu offers a duel then. */
+    net.zernyth.ffa.mode.DuelService duelService;
+
+    public void setDuelService(net.zernyth.ffa.mode.DuelService duelService) {
+        this.duelService = duelService;
+        duelService.setRequestForm(duelMenus::sendDuelRequest);
+    }
 
     /** Set once the economy is wired up; the shop reads cosmetics and prices from it. */
     net.zernyth.ffa.economy.EconomyService economyService;
@@ -121,6 +130,7 @@ public final class FfaFormController implements FormIds {
         this.arenaAdminMenus = new ArenaAdminMenus(this);
         this.kitAdminMenus = new KitAdminMenus(this);
         this.shopMenus = new ShopMenus(this);
+        this.duelMenus = new DuelMenus(this);
     }
 
     public void openPlayerMain(Player player) {
@@ -136,6 +146,10 @@ public final class FfaFormController implements FormIds {
     }
 
     public void handleResponse(Player player, int formId, Response response, boolean wasClosed) {
+        if (formId == FORM_PLAYER_DUEL_REQUEST) {
+            duelMenus.handleDuelRequest(player, response, wasClosed);
+            return;
+        }
         if (wasClosed || response == null) {
             routeClosedForm(player, formId);
             return;
@@ -157,6 +171,7 @@ public final class FfaFormController implements FormIds {
             case FORM_PLAYER_SHOP -> shopMenus.handleShop(player, response);
             case FORM_PLAYER_SHOP_CATEGORY -> shopMenus.handleCategory(player, response);
             case FORM_PLAYER_SHOP_CONFIRM -> shopMenus.handleConfirm(player, response);
+            case FORM_PLAYER_DUEL_SELECT -> duelMenus.handleDuelSelect(player, response);
             case FORM_PLAYER_ARENA_JOINED -> playerMenus.handleArenaJoinedForm(player, response);
             case FORM_ADMIN_MAIN -> arenaAdminMenus.handleAdminMain(player, response);
             case FORM_ADMIN_ARENA_MENU -> arenaAdminMenus.handleAdminArenaMenu(player, response);
@@ -231,7 +246,7 @@ public final class FfaFormController implements FormIds {
     }
 
     public void clearPlayerState(UUID uniqueId) {
-        for (FormSupport module : List.of(playerMenus, playerKitMenus, statsMenus, settingsMenus, arenaAdminMenus, kitAdminMenus, shopMenus)) {
+        for (FormSupport module : List.of(playerMenus, playerKitMenus, statsMenus, settingsMenus, arenaAdminMenus, kitAdminMenus, shopMenus, duelMenus)) {
             module.clear(uniqueId);
         }
     }

@@ -55,6 +55,11 @@ public final class ArenaProtectionListener implements Listener {
             event.setCancelled(true);
             return;
         }
+        if (!arenaSessionService.hitAllowed(attacker.getUniqueId(), victim.getUniqueId())) {
+            // A duel pair, or teammates: see the duel and team services.
+            event.setCancelled(true);
+            return;
+        }
         if (arenaSessionService.hasRespawnProtection(victim.getUniqueId())
                 || arenaSessionService.hasRespawnProtection(attacker.getUniqueId())) {
             event.setCancelled(true);

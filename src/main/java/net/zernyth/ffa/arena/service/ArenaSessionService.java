@@ -40,6 +40,44 @@ public final class ArenaSessionService {
     private static final long RESPAWN_PROTECTION_MILLIS = 5000L;
     private final java.util.List<java.util.function.Consumer<Player>> joinListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+    private final java.util.List<java.util.function.Consumer<Player>> beforeJoinListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final java.util.List<java.util.function.BiConsumer<UUID, String>> leaveListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final java.util.List<java.util.function.BiPredicate<UUID, UUID>> hitFilters = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Called right before a player is placed in an arena (after all checks passed). */
+    public void addBeforeJoinListener(java.util.function.Consumer<Player> listener) {
+        beforeJoinListeners.add(listener);
+    }
+
+    /** Called with the player and the arena id whenever a player leaves an arena, including on logout. */
+    public void addLeaveListener(java.util.function.BiConsumer<UUID, String> listener) {
+        leaveListeners.add(listener);
+    }
+
+    /** A rule that may forbid a hit between two players of the same arena (attacker, victim). */
+    public void addHitFilter(java.util.function.BiPredicate<UUID, UUID> allowed) {
+        hitFilters.add(allowed);
+    }
+
+    public boolean hitAllowed(UUID attacker, UUID victim) {
+        for (java.util.function.BiPredicate<UUID, UUID> filter : hitFilters) {
+            if (!filter.test(attacker, victim)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void notifyLeave(UUID uniqueId, String arenaId) {
+        for (java.util.function.BiConsumer<UUID, String> listener : leaveListeners) {
+            try {
+                listener.accept(uniqueId, arenaId);
+            } catch (RuntimeException exception) {
+                plugin.getLogger().warning("An arena leave listener failed: " + exception.getMessage());
+            }
+        }
+    }
+
     /** Called on the main thread after a player has entered an arena and got their kit. */
     public void addJoinListener(java.util.function.Consumer<Player> listener) {
         joinListeners.add(listener);
@@ -86,6 +124,9 @@ public final class ArenaSessionService {
         }
 
         leaveArena(player, false);
+        for (java.util.function.Consumer<Player> listener : beforeJoinListeners) {
+            listener.accept(player);
+        }
 
         String normalizedArenaId = arena.getArenaId();
         arenaByPlayer.put(player.getUniqueId(), normalizedArenaId);
@@ -127,21 +168,35 @@ public final class ArenaSessionService {
                     playersByArena.remove(arenaId);
                 }
             }
+            notifyLeave(uniqueId, arenaId);
         }
 
         player.getInventory().clearAll();
         player.getInventory().sendContents(player);
 
         if (teleportToLobby) {
-            Level defaultLevel = plugin.getServer().getDefaultLevel();
-            if (defaultLevel != null) {
-                Position safeSpawn = defaultLevel.getSafeSpawn();
-                player.teleport(safeSpawn.getLocation(), PlayerTeleportEvent.TeleportCause.PLUGIN);
-                player.sendMessage(FfaMessageFormatter.info(t(player,
-                        "Returned to lobby.",
-                        "Zur Lobby zurueckgebracht.")));
-            }
+            teleportToLobby(player);
         }
+    }
+
+    public void teleportToLobby(Player player) {
+        Level defaultLevel = plugin.getServer().getDefaultLevel();
+        if (defaultLevel != null) {
+            Position safeSpawn = defaultLevel.getSafeSpawn();
+            player.teleport(safeSpawn.getLocation(), PlayerTeleportEvent.TeleportCause.PLUGIN);
+            player.sendMessage(FfaMessageFormatter.info(t(player,
+                    "Returned to lobby.",
+                    "Zur Lobby zurueckgebracht.")));
+        }
+    }
+
+    /** A random spawn of an arena as a location, loading its world if needed. */
+    public Optional<org.powernukkitx.level.Location> randomSpawnLocation(String arenaId) {
+        Optional<ArenaDefinition> arena = arenaCatalogService.findArena(arenaId);
+        if (arena.isEmpty() || arena.get().getSpawnPoints().isEmpty()) {
+            return Optional.empty();
+        }
+        return ensureLevelLoaded(arena.get().getWorldName()).map(level -> pickRandomSpawn(arena.get()).toLocation(level));
     }
 
     public void handleRespawn(PlayerRespawnEvent event) {
@@ -269,7 +324,7 @@ public final class ArenaSessionService {
             if (players.isEmpty()) {
                 playersByArena.remove(arenaId);
             }
-        }
+        }        notifyLeave(uniqueId, arenaId);
     }
 
     private SpawnPoint pickRandomSpawn(ArenaDefinition arenaDefinition) {

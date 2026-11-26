@@ -70,6 +70,7 @@ public final class FFABootstrap extends PluginBase {
     private KillService killService;
     private KillFarmGuard killFarmGuard;
     private net.zernyth.ffa.progression.ProgressionService progressionService;
+    private net.zernyth.ffa.mode.SpectatorService spectatorService;
     private net.zernyth.ffa.progression.SeasonService seasonService;
     /** Small file writes (seasons) away from the main thread. */
     private final java.util.concurrent.ExecutorService backgroundWriter = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
@@ -96,6 +97,9 @@ public final class FFABootstrap extends PluginBase {
 
     @Override
     public void onDisable() {
+        if (spectatorService != null) {
+            spectatorService.restoreAll();
+        }
         stopReconnectTask();
         if (leaderboardTask != null) {
             leaderboardTask.cancel();
@@ -256,8 +260,11 @@ public final class FFABootstrap extends PluginBase {
                         + (language == net.zernyth.ffa.player.model.PlayerLanguage.GERMAN ? "Muenzen: " : "Coins: ")
                         + TextFormat.YELLOW + profile.getProgress().getCoins()))
                 .orElse(java.util.List.of()));
-        getServer().getCommandMap().register("ffa", new FfaCommand(formController));
-        getServer().getCommandMap().register("ffaadmin", new FfaAdminCommand(formController));
+        FfaCommand ffaCommand = new FfaCommand(formController);
+        FfaAdminCommand ffaAdminCommand = new FfaAdminCommand(formController);
+        registerModes(ffaCommand, ffaAdminCommand);
+        getServer().getCommandMap().register("ffa", ffaCommand);
+        getServer().getCommandMap().register("ffaadmin", ffaAdminCommand);
 
         for (Player player : getServer().getOnlinePlayers().values()) {
             playerProfileService.loadProfile(player, profile -> {
@@ -266,6 +273,90 @@ public final class FFABootstrap extends PluginBase {
                 }
             });
         }
+    }
+
+    /** Duels, spectating and team arenas, with their commands. */
+    private void registerModes(FfaCommand ffa, FfaAdminCommand admin) {
+        var duels = new net.zernyth.ffa.mode.DuelService(
+                new net.zernyth.ffa.mode.DuelBook(net.zernyth.ffa.mode.DuelService.REQUEST_MILLIS, System::currentTimeMillis),
+                arenaSessionService, playerProfileService);
+        duels.setOnWin(progressionService::checkAchievements);
+        arenaSessionService.addHitFilter(duels::hitAllowed);
+        arenaSessionService.addLeaveListener(duels::onLeave);
+        killService.addDeathListener(duels::onDeath);
+        scoreboardService.addLineProvider(duels::scoreboardLines);
+        getServer().getPluginManager().registerEvents(duels, this);
+        formController.setDuelService(duels);
+
+        this.spectatorService = new net.zernyth.ffa.mode.SpectatorService(arenaCatalogService, arenaSessionService, playerProfileService);
+        arenaSessionService.addBeforeJoinListener(spectatorService::beforeJoin);
+        getServer().getPluginManager().registerEvents(spectatorService, this);
+
+        var teams = new net.zernyth.ffa.mode.TeamService(arenaSessionService, playerProfileService,
+                new net.zernyth.ffa.mode.PartyBook(4, net.zernyth.ffa.mode.TeamService.INVITE_MILLIS, System::currentTimeMillis));
+        arenaSessionService.addJoinListener(teams::onJoin);
+        arenaSessionService.addLeaveListener(teams::onLeave);
+        arenaSessionService.addHitFilter(teams::hitAllowed);
+        killService.addListener(teams);
+        scoreboardService.addLineProvider(teams::scoreboardLines);
+        getServer().getPluginManager().registerEvents(teams, this);
+
+        ffa.subcommands().add("duel", "duel <player> | accept | decline", (player, args) -> {
+            if (args.length == 0) {
+                formController.openPlayerMain(player);
+            } else if (args[0].equalsIgnoreCase("accept")) {
+                duels.accept(player);
+            } else if (args[0].equalsIgnoreCase("decline")) {
+                duels.decline(player);
+            } else {
+                duels.challenge(player, getServer().getPlayerExact(args[0]));
+            }
+        });
+        ffa.subcommands().add("spectate", "spectate <arena>  (again to stop)", (player, args) -> {
+            if (args.length == 0 || spectatorService.isSpectating(player.getUniqueId())) {
+                if (!spectatorService.stop(player, true)) {
+                    player.sendMessage(TextFormat.GRAY + "/ffa spectate <arena>");
+                }
+            } else {
+                spectatorService.start(player, args[0]);
+            }
+        });
+        ffa.subcommands().add("team", "team invite <player> | accept | leave | list", (player, args) -> {
+            String action = args.length == 0 ? "list" : args[0].toLowerCase(java.util.Locale.ROOT);
+            switch (action) {
+                case "invite" -> {
+                    if (args.length < 2) {
+                        player.sendMessage(TextFormat.GRAY + "/ffa team invite <player>");
+                    } else {
+                        teams.invite(player, getServer().getPlayerExact(args[1]));
+                    }
+                }
+                case "accept" -> teams.accept(player);
+                case "leave" -> teams.leaveGroup(player);
+                default -> teams.listGroup(player);
+            }
+        });
+        admin.subcommands().add("mode", "mode <arena> <ffa|team> [team size 2-4]", (player, args) -> {
+            if (args.length < 2 || !(args[1].equalsIgnoreCase("ffa") || args[1].equalsIgnoreCase("team"))) {
+                player.sendMessage(TextFormat.GRAY + "/ffaadmin mode <arena> <ffa|team> [team size 2-4]");
+                return;
+            }
+            boolean team = args[1].equalsIgnoreCase("team");
+            int size = 2;
+            if (args.length > 2) {
+                try {
+                    size = Integer.parseInt(args[2]);
+                } catch (NumberFormatException ignored) {
+                    player.sendMessage(TextFormat.RED + "Team size must be a number.");
+                    return;
+                }
+            }
+            if (arenaCatalogService.setArenaMode(args[0], team, size)) {
+                player.sendMessage(TextFormat.GREEN + "Arena " + args[0] + " is now " + (team ? "team mode (size " + Math.max(2, Math.min(4, size)) + ")" : "free for all") + ".");
+            } else {
+                player.sendMessage(TextFormat.RED + "Unknown arena: " + args[0]);
+            }
+        });
     }
 
     private PlayerProfileRepository createPlayerRepository(PluginConfiguration configuration, Path dataPath) throws Exception {

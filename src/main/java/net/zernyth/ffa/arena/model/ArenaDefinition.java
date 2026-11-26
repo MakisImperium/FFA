@@ -17,6 +17,9 @@ public final class ArenaDefinition {
     private String safeZoneId;
     /** This arena's own streak rewards ("3": [...]); empty or missing uses the server's. */
     private Map<String, List<net.zernyth.ffa.streak.StreakReward>> streakRewards;
+    /** "ffa" (everyone against everyone) or "team" (teams of {@link #teamSize}, no friendly fire). */
+    private String mode;
+    private int teamSize;
 
     public ArenaDefinition() {
     }
@@ -87,6 +90,20 @@ public final class ArenaDefinition {
 
     public Map<String, List<net.zernyth.ffa.streak.StreakReward>> getStreakRewards() {
         return streakRewards;
+    }
+
+    public boolean isTeamMode() {
+        return "team".equalsIgnoreCase(mode == null ? "" : mode.trim());
+    }
+
+    /** Players per team in team mode: 2 to 4, default 2. */
+    public int getTeamSize() {
+        return teamSize <= 0 ? 2 : Math.max(2, Math.min(4, teamSize));
+    }
+
+    public void setMode(boolean team, int teamSize) {
+        this.mode = team ? "team" : "ffa";
+        this.teamSize = team ? Math.max(2, Math.min(4, teamSize)) : 0;
     }
 
     public void upsertZone(String zoneId, CuboidZone zone) {

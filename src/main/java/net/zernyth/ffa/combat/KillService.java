@@ -42,6 +42,7 @@ public final class KillService {
     private final CombatTagService combat;
     private final KillFarmGuard farmGuard;
     private final List<KillListener> listeners = new CopyOnWriteArrayList<>();
+    private final List<java.util.function.BiConsumer<Player, Player>> deathListeners = new CopyOnWriteArrayList<>();
 
     public KillService(ArenaSessionService arenas, PlayerProfileService profiles, FfaScoreboardService scoreboards,
                        CombatTagService combat, KillFarmGuard farmGuard) {
@@ -54,6 +55,14 @@ public final class KillService {
 
     public void addListener(KillListener listener) {
         listeners.add(listener);
+    }
+
+    /**
+     * Sees every death in an arena (victim, credited killer or null), also the ones the farm guard
+     * does not count - for duels, which end on any death.
+     */
+    public void addDeathListener(java.util.function.BiConsumer<Player, Player> listener) {
+        deathListeners.add(listener);
     }
 
     public CombatTagService combat() {
@@ -89,6 +98,13 @@ public final class KillService {
         String arenaId = arenas.getArenaIdForPlayer(victimId).orElse(null);
         if (killer != null && (killer.getUniqueId().equals(victimId) || !arenas.areInSameArena(killer.getUniqueId(), victimId))) {
             killer = null;
+        }
+        for (java.util.function.BiConsumer<Player, Player> listener : deathListeners) {
+            try {
+                listener.accept(victim, killer);
+            } catch (RuntimeException failure) {
+                Server.getInstance().getLogger().error("FFA: a death listener failed", failure);
+            }
         }
 
         if (killer != null && !farmGuard.counts(killer.getUniqueId(), victimId)) {

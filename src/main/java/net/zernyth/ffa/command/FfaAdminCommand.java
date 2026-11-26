@@ -6,14 +6,20 @@ import org.powernukkitx.command.CommandSender;
 import org.powernukkitx.utils.TextFormat;
 import net.zernyth.ffa.ui.form.FfaFormController;
 
+/** {@code /ffaadmin} opens the admin menu; {@code /ffaadmin <subcommand>} runs an admin tool. */
 public final class FfaAdminCommand extends Command {
 
     private final FfaFormController formController;
+    private final Subcommands subcommands = new Subcommands();
 
     public FfaAdminCommand(FfaFormController formController) {
-        super("ffaadmin", "Open the FFA admin menu", "/ffaadmin", new String[]{"ffaadm"});
+        super("ffaadmin", "Open the FFA admin menu", "/ffaadmin [help]", new String[]{"ffaadm"});
         setPermission("ffa.admin");
         this.formController = formController;
+    }
+
+    public Subcommands subcommands() {
+        return subcommands;
     }
 
     @Override
@@ -26,9 +32,13 @@ public final class FfaAdminCommand extends Command {
             player.sendMessage(TextFormat.RED + "You do not have permission to use this command.");
             return true;
         }
-        formController.openAdminMain(player);
+        if (args.length == 0) {
+            formController.openAdminMain(player);
+            return true;
+        }
+        if (!subcommands.dispatch(player, args)) {
+            player.sendMessage(TextFormat.GOLD + "FFA Admin" + TextFormat.GRAY + " | /ffaadmin" + subcommands.usage("ffaadmin"));
+        }
         return true;
     }
 }
-
-

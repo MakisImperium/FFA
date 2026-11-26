@@ -146,6 +146,15 @@ public final class ArenaCatalogService {
         return persistAndUpdate(arena.get());
     }
 
+    public boolean setArenaMode(String arenaId, boolean team, int teamSize) {
+        Optional<ArenaDefinition> arena = findArena(arenaId);
+        if (arena.isEmpty()) {
+            return false;
+        }
+        arena.get().setMode(team, teamSize);
+        return persistAndUpdate(arena.get());
+    }
+
     public int setAllArenasStatus(ArenaStatus status) {
         int updated = 0;
         List<ArenaDefinition> snapshot = List.copyOf(arenasById.values());

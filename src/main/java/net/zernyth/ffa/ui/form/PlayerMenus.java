@@ -138,6 +138,13 @@ final class PlayerMenus extends FormSupport {
                 "Language and scoreboard preferences",
                 "Einstellungen",
                 "Sprache und Scoreboard-Einstellungen")));
+        if (root.duelService != null) {
+            form.addElement(new ElementButton(button(player, TextFormat.GOLD,
+                    "Duel",
+                    "Challenge a player here to a 1v1",
+                    "Duell",
+                    "Fordere einen Spieler hier zum 1v1")));
+        }
         form.addElement(new ElementButton(TextFormat.DARK_GRAY + t(player, "Close", "Schliessen")));
         form.send(player, FORM_PLAYER_IN_ARENA_COMMAND);
     }
@@ -175,6 +182,11 @@ final class PlayerMenus extends FormSupport {
             }
             case 1 -> root.playerKitMenus.openPlayerKitMenu(player);
             case 2 -> root.settingsMenus.openPlayerSettings(player);
+            case 3 -> {
+                if (root.duelService != null) {
+                    root.duelMenus.openDuelSelect(player);
+                }
+            }
             default -> {
             }
         }
